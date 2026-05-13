@@ -145,6 +145,14 @@
                     "bandwidth": "250",
                     "coding_rate": "5"
                 },
+                  {
+                    "title": "USA (Southern California)",
+                    "description": "927.875MHz / SF7 / BW62.5 / CR7",
+                    "frequency": "927.875",
+                    "spreading_factor": "7",
+                    "bandwidth": "62.5",
+                    "coding_rate": "7"
+                },
                 {
                     "title": "Vietnam",
                     "description": "920.250MHz / SF11 / BW250 / CR5",
