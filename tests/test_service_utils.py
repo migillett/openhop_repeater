@@ -63,8 +63,12 @@ def test_is_container_detection_paths(monkeypatch):
         (b"abc", "1:name=systemd:/", False, False),
     ],
 )
-def test_is_container_proc_and_host_paths(monkeypatch, environ_bytes, cgroup_text, host_path, expected):
-    monkeypatch.setattr(su.os.path, "exists", lambda p: p == "/run/host/container-manager" and host_path)
+def test_is_container_proc_and_host_paths(
+    monkeypatch, environ_bytes, cgroup_text, host_path, expected
+):
+    monkeypatch.setattr(
+        su.os.path, "exists", lambda p: p == "/run/host/container-manager" and host_path
+    )
     monkeypatch.delenv("container", raising=False)
 
     def _open(path, mode="r", encoding=None):

@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import importlib.util
 import logging
-import subprocess
+import re
+
+# Required for optional dependency installation in controlled, validated path.
+import subprocess  # nosec B404
 import sys
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Optional, Tuple
+
+
+_PIP_PACKAGE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class SensorBase(ABC):
@@ -14,11 +20,18 @@ class SensorBase(ABC):
 
     sensor_type = "sensor"
 
-    def __init__(self, name: str, config: Optional[Dict[str, Any]] = None, log: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        name: str,
+        config: Optional[Dict[str, Any]] = None,
+        log: Optional[logging.Logger] = None,
+    ):
         self.name = name
         self.config = config or {}
         self.settings = self.config.get("settings", {}) if isinstance(self.config, dict) else {}
-        self.enabled = bool(self.config.get("enabled", True)) if isinstance(self.config, dict) else True
+        self.enabled = (
+            bool(self.config.get("enabled", True)) if isinstance(self.config, dict) else True
+        )
         self.log = log or logging.getLogger(self.__class__.__name__)
 
     @abstractmethod
@@ -90,13 +103,20 @@ class SensorBase(ABC):
             return False
 
         for import_name, package_name in missing:
+            if not _PIP_PACKAGE_RE.fullmatch(package_name):
+                self.log.warning(
+                    "Refusing to install dependency with unsupported package name for %s: %r",
+                    self.name,
+                    package_name,
+                )
+                return False
             self.log.info("Installing missing dependency for %s: %s", self.name, package_name)
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "install", package_name],
                 capture_output=True,
                 text=True,
                 check=False,
-            )
+            )  # nosec B603
             if result.returncode != 0:
                 self.log.warning(
                     "Failed installing %s for %s: %s",

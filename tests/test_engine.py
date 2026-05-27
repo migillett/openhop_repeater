@@ -5,6 +5,7 @@ Covers: flood_forward, direct_forward, process_packet, duplicate detection,
 mark_seen, validate_packet, packet scoring, TX delay, cache management,
 airtime duty-cycle, TX mode (forward/monitor/no_tx), and config reloading.
 """
+
 import asyncio
 import base64
 import time
@@ -101,13 +102,14 @@ def handler():
         patch("repeater.engine.RepeaterHandler._start_background_tasks"),
     ):
         from repeater.engine import RepeaterHandler
+
         h = RepeaterHandler(config, dispatcher, LOCAL_HASH)
     return h
 
 
-def _make_flood_packet(payload: bytes = b"\x01\x02\x03\x04",
-                        path: bytes = b"",
-                        payload_type: int = 0x01) -> Packet:
+def _make_flood_packet(
+    payload: bytes = b"\x01\x02\x03\x04", path: bytes = b"", payload_type: int = 0x01
+) -> Packet:
     """Build a FLOOD-routed packet."""
     pkt = Packet()
     # header: route=FLOOD(0x01), payload_type shifted, version=0
@@ -119,9 +121,9 @@ def _make_flood_packet(payload: bytes = b"\x01\x02\x03\x04",
     return pkt
 
 
-def _make_direct_packet(payload: bytes = b"\x01\x02\x03\x04",
-                         path: bytes = None,
-                         payload_type: int = 0x01) -> Packet:
+def _make_direct_packet(
+    payload: bytes = b"\x01\x02\x03\x04", path: bytes = None, payload_type: int = 0x01
+) -> Packet:
     """Build a DIRECT-routed packet with path[0] == LOCAL_HASH by default."""
     if path is None:
         path = bytes([LOCAL_HASH, 0xCC, 0xDD])
@@ -134,10 +136,12 @@ def _make_direct_packet(payload: bytes = b"\x01\x02\x03\x04",
     return pkt
 
 
-def _make_transport_flood_packet(payload: bytes = b"\x01\x02\x03\x04",
-                                  path: bytes = b"",
-                                  payload_type: int = 0x01,
-                                  transport_codes=(0x1234, 0x5678)) -> Packet:
+def _make_transport_flood_packet(
+    payload: bytes = b"\x01\x02\x03\x04",
+    path: bytes = b"",
+    payload_type: int = 0x01,
+    transport_codes=(0x1234, 0x5678),
+) -> Packet:
     """Build a TRANSPORT_FLOOD-routed packet."""
     pkt = Packet()
     pkt.header = ROUTE_TYPE_TRANSPORT_FLOOD | (payload_type << PH_TYPE_SHIFT)
@@ -149,10 +153,12 @@ def _make_transport_flood_packet(payload: bytes = b"\x01\x02\x03\x04",
     return pkt
 
 
-def _make_transport_direct_packet(payload: bytes = b"\x01\x02\x03\x04",
-                                   path: bytes = None,
-                                   payload_type: int = 0x01,
-                                   transport_codes=(0x1234, 0x5678)) -> Packet:
+def _make_transport_direct_packet(
+    payload: bytes = b"\x01\x02\x03\x04",
+    path: bytes = None,
+    payload_type: int = 0x01,
+    transport_codes=(0x1234, 0x5678),
+) -> Packet:
     """Build a TRANSPORT_DIRECT-routed packet with path[0] == LOCAL_HASH."""
     if path is None:
         path = bytes([LOCAL_HASH, 0xCC])
@@ -169,6 +175,7 @@ def _make_transport_direct_packet(payload: bytes = b"\x01\x02\x03\x04",
 # ===================================================================
 # 1. flood_forward
 # ===================================================================
+
 
 class TestFloodForward:
     """flood_forward: validation, duplicate suppression, path append."""
@@ -237,7 +244,7 @@ class TestFloodForward:
     def test_hash_computed_before_path_append(self, handler):
         """mark_seen must use the pre-append hash so duplicate detection works
         when another node sends the same packet with or without our hash."""
-        pkt1 = _make_flood_packet(payload=b"\xAA\xBB")
+        pkt1 = _make_flood_packet(payload=b"\xaa\xbb")
         hash_before = pkt1.calculate_packet_hash().hex().upper()
 
         handler.flood_forward(pkt1)
@@ -270,6 +277,7 @@ class TestFloodForward:
 # ===================================================================
 # 2. direct_forward
 # ===================================================================
+
 
 class TestDirectForward:
     """direct_forward: next-hop check, path consumption, duplicate suppression."""
@@ -343,6 +351,7 @@ class TestDirectForward:
 # 3. process_packet — route dispatch
 # ===================================================================
 
+
 class TestProcessPacket:
     """process_packet routes to flood_forward or direct_forward."""
 
@@ -364,7 +373,7 @@ class TestProcessPacket:
 
     def test_transport_flood_dispatched(self, handler):
         pkt = _make_transport_flood_packet()
-        with patch.object(handler, '_check_transport_codes', return_value=(True, "")):
+        with patch.object(handler, "_check_transport_codes", return_value=(True, "")):
             result = handler.process_packet(pkt, snr=5.0)
         assert result is not None
         fwd_pkt, _ = result
@@ -409,6 +418,7 @@ class TestProcessPacket:
 # ===================================================================
 # 4. is_duplicate / mark_seen / cache management
 # ===================================================================
+
 
 class TestDuplicateDetection:
     """Duplicate tracking, TTL clean-up, and cache eviction."""
@@ -464,6 +474,7 @@ class TestDuplicateDetection:
 # 5. validate_packet
 # ===================================================================
 
+
 class TestValidatePacket:
     """validate_packet: empty payload, oversized path."""
 
@@ -500,51 +511,62 @@ class TestValidatePacket:
 # 6. calculate_packet_score — static method
 # ===================================================================
 
+
 class TestPacketScore:
     """Score: SNR thresholds, collision penalty, clamping."""
 
     def test_below_threshold_returns_zero(self):
         from repeater.engine import RepeaterHandler
+
         # SF8 threshold is -10.0
         score = RepeaterHandler.calculate_packet_score(snr=-15.0, packet_len=50, spreading_factor=8)
         assert score == 0.0
 
     def test_at_threshold_returns_zero(self):
         from repeater.engine import RepeaterHandler
+
         score = RepeaterHandler.calculate_packet_score(snr=-10.0, packet_len=50, spreading_factor=8)
         assert score == 0.0
 
     def test_above_threshold_positive(self):
         from repeater.engine import RepeaterHandler
+
         score = RepeaterHandler.calculate_packet_score(snr=0.0, packet_len=50, spreading_factor=8)
         assert score > 0.0
 
     def test_high_snr_high_score(self):
         from repeater.engine import RepeaterHandler
+
         score = RepeaterHandler.calculate_packet_score(snr=10.0, packet_len=10, spreading_factor=8)
         assert score > 0.5
 
     def test_long_packet_collision_penalty(self):
         from repeater.engine import RepeaterHandler
+
         short = RepeaterHandler.calculate_packet_score(snr=5.0, packet_len=10, spreading_factor=8)
         long_ = RepeaterHandler.calculate_packet_score(snr=5.0, packet_len=250, spreading_factor=8)
         assert short > long_
 
     def test_score_clamped_to_0_1(self):
         from repeater.engine import RepeaterHandler
+
         score = RepeaterHandler.calculate_packet_score(snr=50.0, packet_len=1, spreading_factor=8)
         assert 0.0 <= score <= 1.0
 
     def test_sf_below_7_returns_zero(self):
         from repeater.engine import RepeaterHandler
+
         score = RepeaterHandler.calculate_packet_score(snr=10.0, packet_len=50, spreading_factor=6)
         assert score == 0.0
 
     def test_each_sf_has_different_threshold(self):
         from repeater.engine import RepeaterHandler
+
         scores = {}
         for sf in (7, 8, 9, 10, 11, 12):
-            scores[sf] = RepeaterHandler.calculate_packet_score(snr=-5.0, packet_len=50, spreading_factor=sf)
+            scores[sf] = RepeaterHandler.calculate_packet_score(
+                snr=-5.0, packet_len=50, spreading_factor=sf
+            )
         # Higher SF → lower threshold → better reception at same SNR
         # At SNR=-5, SF7 (threshold -7.5) should be worse than SF12 (threshold -20)
         assert scores[12] > scores[7]
@@ -553,6 +575,7 @@ class TestPacketScore:
 # ===================================================================
 # 7. _calculate_tx_delay
 # ===================================================================
+
 
 class TestTxDelay:
     """TX delay: flood random, direct fixed, score adjustment, cap."""
@@ -616,11 +639,12 @@ class TestTxDelay:
 # 8. Hash stability through forwarding operations
 # ===================================================================
 
+
 class TestHashStabilityThroughForwarding:
     """Verify hash is computed on original packet (before path mutation)."""
 
     def test_flood_hash_unchanged_after_forward(self, handler):
-        pkt = _make_flood_packet(payload=b"\xDE\xAD")
+        pkt = _make_flood_packet(payload=b"\xde\xad")
         hash_before = pkt.calculate_packet_hash().hex().upper()
 
         handler.flood_forward(pkt)
@@ -628,8 +652,7 @@ class TestHashStabilityThroughForwarding:
         assert hash_before in handler.seen_packets
 
     def test_direct_hash_unchanged_after_forward(self, handler):
-        pkt = _make_direct_packet(payload=b"\xBE\xEF",
-                                   path=bytes([LOCAL_HASH, 0xCC]))
+        pkt = _make_direct_packet(payload=b"\xbe\xef", path=bytes([LOCAL_HASH, 0xCC]))
         hash_before = pkt.calculate_packet_hash().hex().upper()
 
         handler.direct_forward(pkt)
@@ -638,17 +661,15 @@ class TestHashStabilityThroughForwarding:
     def test_flood_second_identical_detected_as_duplicate(self, handler):
         """Two identical packets with the same payload (but path not yet modified)
         should be correctly detected as duplicates."""
-        p1 = _make_flood_packet(payload=b"\xCA\xFE")
-        p2 = _make_flood_packet(payload=b"\xCA\xFE")
+        p1 = _make_flood_packet(payload=b"\xca\xfe")
+        p2 = _make_flood_packet(payload=b"\xca\xfe")
         handler.flood_forward(p1)
         result = handler.flood_forward(p2)
         assert result is None
 
     def test_direct_second_identical_detected_as_duplicate(self, handler):
-        p1 = _make_direct_packet(payload=b"\xCA\xFE",
-                                  path=bytes([LOCAL_HASH, 0x11]))
-        p2 = _make_direct_packet(payload=b"\xCA\xFE",
-                                  path=bytes([LOCAL_HASH, 0x11]))
+        p1 = _make_direct_packet(payload=b"\xca\xfe", path=bytes([LOCAL_HASH, 0x11]))
+        p2 = _make_direct_packet(payload=b"\xca\xfe", path=bytes([LOCAL_HASH, 0x11]))
         handler.direct_forward(p1)
         result = handler.direct_forward(p2)
         assert result is None
@@ -657,6 +678,7 @@ class TestHashStabilityThroughForwarding:
 # ===================================================================
 # 9. unscoped flood policy
 # ===================================================================
+
 
 class TestUnscopedFloodPolicy:
     """unscoped_flood_allow=False blocks plain flood, transport checked."""
@@ -680,7 +702,7 @@ class TestUnscopedFloodPolicy:
         # unscoped traffic is denied — the two settings are fully independent.
         handler.config["mesh"]["unscoped_flood_allow"] = False
         pkt = _make_transport_flood_packet()
-        with patch.object(handler, '_check_transport_codes', return_value=(True, "")):
+        with patch.object(handler, "_check_transport_codes", return_value=(True, "")):
             result = handler.flood_forward(pkt)
         assert result is not None  # transport flood passes; unscoped=False did not block it
 
@@ -735,6 +757,7 @@ class TestFloodLoopDetection:
 # 10. Airtime / duty-cycle integration
 # ===================================================================
 
+
 class TestAirtimeIntegration:
     """Airtime calculation and duty-cycle enforcement."""
 
@@ -771,6 +794,7 @@ class TestAirtimeIntegration:
 # 11. Config reload
 # ===================================================================
 
+
 class TestConfigReload:
     """reload_runtime_config updates in-memory state."""
 
@@ -798,6 +822,7 @@ class TestConfigReload:
 # ===================================================================
 # 12. _get_drop_reason
 # ===================================================================
+
 
 class TestGetDropReason:
     """_get_drop_reason: determine why a packet was not forwarded."""
@@ -842,12 +867,13 @@ class TestGetDropReason:
 # 13. Transport route forwarding
 # ===================================================================
 
+
 class TestTransportForwarding:
     """TRANSPORT_FLOOD and TRANSPORT_DIRECT: packet routing through process_packet."""
 
     def test_transport_flood_appends_path(self, handler):
         pkt = _make_transport_flood_packet(path=b"\x11")
-        with patch.object(handler, '_check_transport_codes', return_value=(True, "")):
+        with patch.object(handler, "_check_transport_codes", return_value=(True, "")):
             result = handler.process_packet(pkt, snr=5.0)
         assert result is not None
         fwd_pkt, _ = result
@@ -863,7 +889,7 @@ class TestTransportForwarding:
 
     def test_transport_codes_preserved_after_flood(self, handler):
         pkt = _make_transport_flood_packet(transport_codes=(0xAAAA, 0xBBBB))
-        with patch.object(handler, '_check_transport_codes', return_value=(True, "")):
+        with patch.object(handler, "_check_transport_codes", return_value=(True, "")):
             result = handler.process_packet(pkt, snr=5.0)
         assert result is not None
         fwd_pkt, _ = result
@@ -880,6 +906,7 @@ class TestTransportForwarding:
 # ===================================================================
 # 14. Statistics tracking
 # ===================================================================
+
 
 class TestStatistics:
     """RX/TX/dropped counters and recent_packets list."""
@@ -908,6 +935,7 @@ class TestStatistics:
 # 15. Edge cases and regression tests
 # ===================================================================
 
+
 class TestEdgeCases:
     """Miscellaneous edge cases and regressions."""
 
@@ -924,12 +952,12 @@ class TestEdgeCases:
     def test_flood_forward_idempotent_on_second_call(self, handler):
         """Calling flood_forward again with the SAME packet object should
         detect as duplicate (the first call already mark_seen'd it)."""
-        pkt = _make_flood_packet(payload=b"\xFF" * 10)
+        pkt = _make_flood_packet(payload=b"\xff" * 10)
         r1 = handler.flood_forward(pkt)
         assert r1 is not None
         # Now pkt has local_hash appended, but hash was computed pre-append.
         # A new packet with same original payload should be duplicate.
-        pkt2 = _make_flood_packet(payload=b"\xFF" * 10)
+        pkt2 = _make_flood_packet(payload=b"\xff" * 10)
         r2 = handler.flood_forward(pkt2)
         assert r2 is None
 
@@ -987,6 +1015,7 @@ class TestEdgeCases:
 # ===================================================================
 # 15b. TX mode: forward, monitor, no_tx
 # ===================================================================
+
 
 @pytest.mark.asyncio
 class TestTxMode:
@@ -1048,6 +1077,7 @@ class TestTxMode:
 # 16. Airtime calculation correctness
 # ===================================================================
 
+
 class TestAirtimeCalculation:
     """Semtech LoRa airtime formula validation."""
 
@@ -1055,8 +1085,9 @@ class TestAirtimeCalculation:
         """SF7, 125kHz, CR4/5, 10-byte payload — well-known reference value."""
         mgr = handler.airtime_mgr
         # Override to known settings
-        at = mgr.calculate_airtime(10, spreading_factor=7, bandwidth_hz=125000,
-                                    coding_rate=5, preamble_len=8)
+        at = mgr.calculate_airtime(
+            10, spreading_factor=7, bandwidth_hz=125000, coding_rate=5, preamble_len=8
+        )
         # Semtech calculator: ~36ms for these params
         assert 30.0 < at < 50.0
 
@@ -1080,190 +1111,240 @@ class TestAirtimeCalculation:
 # ---- 20 GOOD packets: all should be forwarded by process_packet ----
 GOOD_PACKETS = [
     # (id, description, builder)
-    ("good_flood_minimal",
-     "Flood, 1-byte payload, empty path",
-     lambda: _make_flood_packet(payload=b"\x01")),
-
-    ("good_flood_typical",
-     "Flood, 10-byte payload, 2-hop path",
-     lambda: _make_flood_packet(payload=bytes(range(10)), path=b"\x11\x22")),
-
-    ("good_flood_max_payload_type",
-     "Flood, payload_type=15 (max 4-bit)",
-     lambda: _make_flood_packet(payload=b"\xAA\xBB", payload_type=15)),
-
-    ("good_flood_payload_type_0",
-     "Flood, payload_type=0 (plain text)",
-     lambda: _make_flood_packet(payload=b"\x01\x02\x03", payload_type=0)),
-
-    ("good_flood_long_payload",
-     "Flood, 200-byte payload",
-     lambda: _make_flood_packet(payload=bytes(range(200)))),
-
-    ("good_flood_single_byte_path",
-     "Flood, path has 1 prior hop",
-     lambda: _make_flood_packet(payload=b"\xDE\xAD", path=b"\x42")),
-
-    ("good_flood_binary_payload",
-     "Flood, all-zero payload",
-     lambda: _make_flood_packet(payload=b"\x00" * 16)),
-
-    ("good_flood_high_entropy",
-     "Flood, high-entropy random-looking payload",
-     lambda: _make_flood_packet(payload=bytes(i ^ 0xA5 for i in range(64)))),
-
-    ("good_flood_advert_type",
-     "Flood, payload_type=4 (ADVERT)",
-     lambda: _make_flood_packet(payload=b"\xAB\x01\x02\x03", payload_type=4)),
-
-    ("good_direct_minimal",
-     "Direct, 1-byte payload, single hop to us (forward with empty path)",
-     lambda: _make_direct_packet(payload=b"\x01", path=bytes([LOCAL_HASH]))),
-
-    ("good_direct_multihop",
-     "Direct, 3-hop remaining path (us + 2 more)",
-     lambda: _make_direct_packet(payload=b"\xCA\xFE", path=bytes([LOCAL_HASH, 0x11, 0x22]))),
-
-    ("good_direct_long_payload",
-     "Direct, 150-byte payload",
-     lambda: _make_direct_packet(payload=bytes(range(150)), path=bytes([LOCAL_HASH, 0xBB]))),
-
-    ("good_direct_type_2",
-     "Direct, payload_type=2 (ACK)",
-     lambda: _make_direct_packet(payload=b"\x01\x02", path=bytes([LOCAL_HASH]),
-                                  payload_type=2)),
-
-    ("good_direct_long_remaining_path",
-     "Direct, 10 hops remaining after us",
-     lambda: _make_direct_packet(payload=b"\xFF\xEE",
-                                  path=bytes([LOCAL_HASH] + list(range(10))))),
-
-    ("good_transport_direct_basic",
-     "Transport direct, basic hop to us",
-     lambda: _make_transport_direct_packet(payload=b"\x01\x02")),
-    ("good_transport_direct_long_path",
-     "Transport direct, 5 remaining hops",
-     lambda: _make_transport_direct_packet(
-         payload=b"\xDE\xAD\xBE\xEF",
-         path=bytes([LOCAL_HASH, 0x11, 0x22, 0x33, 0x44]))),
+    (
+        "good_flood_minimal",
+        "Flood, 1-byte payload, empty path",
+        lambda: _make_flood_packet(payload=b"\x01"),
+    ),
+    (
+        "good_flood_typical",
+        "Flood, 10-byte payload, 2-hop path",
+        lambda: _make_flood_packet(payload=bytes(range(10)), path=b"\x11\x22"),
+    ),
+    (
+        "good_flood_max_payload_type",
+        "Flood, payload_type=15 (max 4-bit)",
+        lambda: _make_flood_packet(payload=b"\xaa\xbb", payload_type=15),
+    ),
+    (
+        "good_flood_payload_type_0",
+        "Flood, payload_type=0 (plain text)",
+        lambda: _make_flood_packet(payload=b"\x01\x02\x03", payload_type=0),
+    ),
+    (
+        "good_flood_long_payload",
+        "Flood, 200-byte payload",
+        lambda: _make_flood_packet(payload=bytes(range(200))),
+    ),
+    (
+        "good_flood_single_byte_path",
+        "Flood, path has 1 prior hop",
+        lambda: _make_flood_packet(payload=b"\xde\xad", path=b"\x42"),
+    ),
+    (
+        "good_flood_binary_payload",
+        "Flood, all-zero payload",
+        lambda: _make_flood_packet(payload=b"\x00" * 16),
+    ),
+    (
+        "good_flood_high_entropy",
+        "Flood, high-entropy random-looking payload",
+        lambda: _make_flood_packet(payload=bytes(i ^ 0xA5 for i in range(64))),
+    ),
+    (
+        "good_flood_advert_type",
+        "Flood, payload_type=4 (ADVERT)",
+        lambda: _make_flood_packet(payload=b"\xab\x01\x02\x03", payload_type=4),
+    ),
+    (
+        "good_direct_minimal",
+        "Direct, 1-byte payload, single hop to us (forward with empty path)",
+        lambda: _make_direct_packet(payload=b"\x01", path=bytes([LOCAL_HASH])),
+    ),
+    (
+        "good_direct_multihop",
+        "Direct, 3-hop remaining path (us + 2 more)",
+        lambda: _make_direct_packet(payload=b"\xca\xfe", path=bytes([LOCAL_HASH, 0x11, 0x22])),
+    ),
+    (
+        "good_direct_long_payload",
+        "Direct, 150-byte payload",
+        lambda: _make_direct_packet(payload=bytes(range(150)), path=bytes([LOCAL_HASH, 0xBB])),
+    ),
+    (
+        "good_direct_type_2",
+        "Direct, payload_type=2 (ACK)",
+        lambda: _make_direct_packet(payload=b"\x01\x02", path=bytes([LOCAL_HASH]), payload_type=2),
+    ),
+    (
+        "good_direct_long_remaining_path",
+        "Direct, 10 hops remaining after us",
+        lambda: _make_direct_packet(
+            payload=b"\xff\xee", path=bytes([LOCAL_HASH] + list(range(10)))
+        ),
+    ),
+    (
+        "good_transport_direct_basic",
+        "Transport direct, basic hop to us",
+        lambda: _make_transport_direct_packet(payload=b"\x01\x02"),
+    ),
+    (
+        "good_transport_direct_long_path",
+        "Transport direct, 5 remaining hops",
+        lambda: _make_transport_direct_packet(
+            payload=b"\xde\xad\xbe\xef", path=bytes([LOCAL_HASH, 0x11, 0x22, 0x33, 0x44])
+        ),
+    ),
 ]
 
 
 # ---- 20 BAD packets: all should be dropped / return None ----
 BAD_PACKETS = [
     # (id, description, builder)
-    ("bad_empty_payload",
-     "Empty bytearray payload",
-     lambda: _make_flood_packet(payload=b""),
-     "Empty payload"),
-
-    ("bad_none_payload",
-     "payload = None",
-     lambda: (lambda p: (setattr(p, "payload", None), p)[-1])(_make_flood_packet()),
-     "Empty payload"),
-
-    ("bad_path_at_max",
-     "Path exactly MAX_PATH_SIZE — no room to append",
-     lambda: _make_flood_packet(payload=b"\x01", path=bytes(range(MAX_PATH_SIZE))),
-     "Path length"),
-
-    ("bad_flood_path_near_max",
-     "Flood, path = MAX_PATH_SIZE - 1 (63 hops; path_len encodes 0-63, cannot append)",
-     lambda: _make_flood_packet(payload=b"\xFF", path=bytes(range(MAX_PATH_SIZE - 1))),
-     "cannot append"),
-
-    ("bad_path_over_max",
-     "Path exceeds MAX_PATH_SIZE",
-     lambda: _make_flood_packet(payload=b"\x01", path=bytes(range(MAX_PATH_SIZE + 5))),
-     "Path length"),
-
-    ("bad_do_not_retransmit",
-     "Marked do-not-retransmit",
-     lambda: (lambda p: (p.mark_do_not_retransmit(), p)[-1])(_make_flood_packet()),
-     "do not retransmit"),
-
-    ("bad_direct_wrong_hop",
-     "Direct packet, path[0] != LOCAL_HASH",
-     lambda: _make_direct_packet(path=bytes([0xFF, 0xCC])),
-     "not for us"),
-
-    ("bad_direct_empty_path",
-     "Direct packet with empty path",
-     lambda: _make_direct_packet(path=b""),
-     "no path"),
-
-    ("bad_direct_none_path",
-     "Direct packet with path = None",
-     lambda: (lambda p: (setattr(p, "path", None), setattr(p, "path_len", 0), p)[-1])(
-         _make_direct_packet()),
-     "no path"),
-
-    ("bad_flood_policy_off",
-     "Plain flood when unscoped_flood_allow=False (needs config override)",
-     lambda: _make_flood_packet(payload=b"\x01\x02"),
-     "unscoped flood"),
-
-    ("bad_transport_flood_no_keys",
-     "Transport flood with no configured transport keys — always denied",
-     lambda: _make_transport_flood_packet(payload=b"\x01\x02"),
-     "transport"),
-
-    ("bad_direct_empty_payload",
-     "Direct with empty payload (now caught by validate_packet)",
-     lambda: (lambda p: (setattr(p, "payload", bytearray()), setattr(p, "payload_len", 0), p)[-1])(
-         _make_direct_packet(path=bytes([LOCAL_HASH]))),
-     "Empty payload"),
-
-    ("bad_flood_zero_len_payload",
-     "Flood with payload_len forced to 0",
-     lambda: (lambda p: (setattr(p, "payload_len", 0), setattr(p, "payload", bytearray()), p)[-1])(
-         _make_flood_packet(payload=b"\x01")),
-     "Empty payload"),
-
-    ("bad_direct_only_wrong_hops",
-     "Direct path of all 0xFF bytes (none match LOCAL_HASH)",
-     lambda: _make_direct_packet(path=bytes([0xFF, 0xFE, 0xFD])),
-     "not for us"),
-
-    ("bad_transport_direct_wrong_hop",
-     "Transport direct with wrong first hop",
-     lambda: _make_transport_direct_packet(path=bytes([0x01, 0x02])),
-     "not for us"),
-
-    ("bad_transport_direct_empty_path",
-     "Transport direct with empty path",
-     lambda: _make_transport_direct_packet(path=b""),
-     "no path"),
-
-    ("bad_transport_direct_none_path",
-     "Transport direct with path = None",
-     lambda: (lambda p: (setattr(p, "path", None), setattr(p, "path_len", 0), p)[-1])(
-         _make_transport_direct_packet()),
-     "no path"),
-
-    ("bad_flood_payload_255_zeros",
-     "Flood with payload = bytearray(0) (empty)",
-     lambda: (lambda p: (setattr(p, "payload", bytearray()), setattr(p, "payload_len", 0), p)[-1])(
-         _make_flood_packet()),
-     "Empty payload"),
-
-    ("bad_direct_none_payload",
-     "Direct with None payload (now caught by validate_packet)",
-     lambda: (lambda p: (setattr(p, "payload", None), p)[-1])(
-         _make_direct_packet(path=bytes([LOCAL_HASH]))),
-     "Empty payload"),
-
-    ("bad_flood_do_not_retransmit_custom",
-     "Flood, do-not-retransmit with custom drop reason",
-     lambda: (lambda p: (p.mark_do_not_retransmit(), setattr(p, "drop_reason", "Advert consumed"), p)[-1])(
-         _make_flood_packet(payload=b"\xAB")),
-     "Advert consumed"),
-
-    ("bad_direct_do_not_retransmit",
-     "Direct, marked do-not-retransmit (now caught by direct_forward)",
-     lambda: (lambda p: (p.mark_do_not_retransmit(), p)[-1])(
-         _make_direct_packet(payload=b"\x99", path=bytes([LOCAL_HASH, 0x11]))),
-     "do not retransmit"),
+    (
+        "bad_empty_payload",
+        "Empty bytearray payload",
+        lambda: _make_flood_packet(payload=b""),
+        "Empty payload",
+    ),
+    (
+        "bad_none_payload",
+        "payload = None",
+        lambda: (lambda p: (setattr(p, "payload", None), p)[-1])(_make_flood_packet()),
+        "Empty payload",
+    ),
+    (
+        "bad_path_at_max",
+        "Path exactly MAX_PATH_SIZE — no room to append",
+        lambda: _make_flood_packet(payload=b"\x01", path=bytes(range(MAX_PATH_SIZE))),
+        "Path length",
+    ),
+    (
+        "bad_flood_path_near_max",
+        "Flood, path = MAX_PATH_SIZE - 1 (63 hops; path_len encodes 0-63, cannot append)",
+        lambda: _make_flood_packet(payload=b"\xff", path=bytes(range(MAX_PATH_SIZE - 1))),
+        "cannot append",
+    ),
+    (
+        "bad_path_over_max",
+        "Path exceeds MAX_PATH_SIZE",
+        lambda: _make_flood_packet(payload=b"\x01", path=bytes(range(MAX_PATH_SIZE + 5))),
+        "Path length",
+    ),
+    (
+        "bad_do_not_retransmit",
+        "Marked do-not-retransmit",
+        lambda: (lambda p: (p.mark_do_not_retransmit(), p)[-1])(_make_flood_packet()),
+        "do not retransmit",
+    ),
+    (
+        "bad_direct_wrong_hop",
+        "Direct packet, path[0] != LOCAL_HASH",
+        lambda: _make_direct_packet(path=bytes([0xFF, 0xCC])),
+        "not for us",
+    ),
+    (
+        "bad_direct_empty_path",
+        "Direct packet with empty path",
+        lambda: _make_direct_packet(path=b""),
+        "no path",
+    ),
+    (
+        "bad_direct_none_path",
+        "Direct packet with path = None",
+        lambda: (lambda p: (setattr(p, "path", None), setattr(p, "path_len", 0), p)[-1])(
+            _make_direct_packet()
+        ),
+        "no path",
+    ),
+    (
+        "bad_flood_policy_off",
+        "Plain flood when unscoped_flood_allow=False (needs config override)",
+        lambda: _make_flood_packet(payload=b"\x01\x02"),
+        "unscoped flood",
+    ),
+    (
+        "bad_transport_flood_no_keys",
+        "Transport flood with no configured transport keys — always denied",
+        lambda: _make_transport_flood_packet(payload=b"\x01\x02"),
+        "transport",
+    ),
+    (
+        "bad_direct_empty_payload",
+        "Direct with empty payload (now caught by validate_packet)",
+        lambda: (
+            lambda p: (setattr(p, "payload", bytearray()), setattr(p, "payload_len", 0), p)[-1]
+        )(_make_direct_packet(path=bytes([LOCAL_HASH]))),
+        "Empty payload",
+    ),
+    (
+        "bad_flood_zero_len_payload",
+        "Flood with payload_len forced to 0",
+        lambda: (
+            lambda p: (setattr(p, "payload_len", 0), setattr(p, "payload", bytearray()), p)[-1]
+        )(_make_flood_packet(payload=b"\x01")),
+        "Empty payload",
+    ),
+    (
+        "bad_direct_only_wrong_hops",
+        "Direct path of all 0xFF bytes (none match LOCAL_HASH)",
+        lambda: _make_direct_packet(path=bytes([0xFF, 0xFE, 0xFD])),
+        "not for us",
+    ),
+    (
+        "bad_transport_direct_wrong_hop",
+        "Transport direct with wrong first hop",
+        lambda: _make_transport_direct_packet(path=bytes([0x01, 0x02])),
+        "not for us",
+    ),
+    (
+        "bad_transport_direct_empty_path",
+        "Transport direct with empty path",
+        lambda: _make_transport_direct_packet(path=b""),
+        "no path",
+    ),
+    (
+        "bad_transport_direct_none_path",
+        "Transport direct with path = None",
+        lambda: (lambda p: (setattr(p, "path", None), setattr(p, "path_len", 0), p)[-1])(
+            _make_transport_direct_packet()
+        ),
+        "no path",
+    ),
+    (
+        "bad_flood_payload_255_zeros",
+        "Flood with payload = bytearray(0) (empty)",
+        lambda: (
+            lambda p: (setattr(p, "payload", bytearray()), setattr(p, "payload_len", 0), p)[-1]
+        )(_make_flood_packet()),
+        "Empty payload",
+    ),
+    (
+        "bad_direct_none_payload",
+        "Direct with None payload (now caught by validate_packet)",
+        lambda: (lambda p: (setattr(p, "payload", None), p)[-1])(
+            _make_direct_packet(path=bytes([LOCAL_HASH]))
+        ),
+        "Empty payload",
+    ),
+    (
+        "bad_flood_do_not_retransmit_custom",
+        "Flood, do-not-retransmit with custom drop reason",
+        lambda: (
+            lambda p: (p.mark_do_not_retransmit(), setattr(p, "drop_reason", "Advert consumed"), p)[
+                -1
+            ]
+        )(_make_flood_packet(payload=b"\xab")),
+        "Advert consumed",
+    ),
+    (
+        "bad_direct_do_not_retransmit",
+        "Direct, marked do-not-retransmit (now caught by direct_forward)",
+        lambda: (lambda p: (p.mark_do_not_retransmit(), p)[-1])(
+            _make_direct_packet(payload=b"\x99", path=bytes([LOCAL_HASH, 0x11]))
+        ),
+        "do not retransmit",
+    ),
 ]
 
 
@@ -1276,7 +1357,9 @@ class TestGoodPacketArray:
     """All 20 good packets should be forwarded successfully."""
 
     @pytest.mark.parametrize(
-        "name, desc, builder", GOOD_PACKETS, ids=_good_ids,
+        "name, desc, builder",
+        GOOD_PACKETS,
+        ids=_good_ids,
     )
     def test_process_packet_forwards(self, handler, name, desc, builder):
         pkt = builder()
@@ -1286,14 +1369,18 @@ class TestGoodPacketArray:
         assert delay >= 0.0
 
     @pytest.mark.parametrize(
-        "name, desc, builder", GOOD_PACKETS, ids=_good_ids,
+        "name, desc, builder",
+        GOOD_PACKETS,
+        ids=_good_ids,
     )
     def test_good_packet_not_duplicate_on_first_see(self, handler, name, desc, builder):
         pkt = builder()
         assert handler.is_duplicate(pkt) is False, f"[{name}] falsely flagged as duplicate"
 
     @pytest.mark.parametrize(
-        "name, desc, builder", GOOD_PACKETS, ids=_good_ids,
+        "name, desc, builder",
+        GOOD_PACKETS,
+        ids=_good_ids,
     )
     def test_good_packet_path_modified(self, handler, name, desc, builder):
         pkt = builder()
@@ -1317,7 +1404,8 @@ class TestBadPacketArray:
 
     @pytest.mark.parametrize(
         "name, desc, builder, expected_reason",
-        BAD_PACKETS, ids=_bad_ids,
+        BAD_PACKETS,
+        ids=_bad_ids,
     )
     def test_process_packet_drops(self, handler, name, desc, builder, expected_reason):
         # Two entries need unscoped_flood_allow=False
@@ -1330,7 +1418,8 @@ class TestBadPacketArray:
 
     @pytest.mark.parametrize(
         "name, desc, builder, expected_reason",
-        BAD_PACKETS, ids=_bad_ids,
+        BAD_PACKETS,
+        ids=_bad_ids,
     )
     def test_drop_reason_set(self, handler, name, desc, builder, expected_reason):
         if "policy_off" in name:
@@ -1345,7 +1434,8 @@ class TestBadPacketArray:
 
     @pytest.mark.parametrize(
         "name, desc, builder, expected_reason",
-        BAD_PACKETS, ids=_bad_ids,
+        BAD_PACKETS,
+        ids=_bad_ids,
     )
     def test_bad_packet_not_marked_seen(self, handler, name, desc, builder, expected_reason):
         """Dropped packets must NOT pollute the seen cache."""
@@ -1405,9 +1495,7 @@ class TestPacketInjectionRouting:
     async def test_injected_flood_forwards_and_appends_path(self, handler):
         self._prepare_fast_tx(handler)
 
-        pkt = _inject_from_wire(
-            _make_flood_packet(payload=b"\x10\x20\x30", path=b"\x11")
-        )
+        pkt = _inject_from_wire(_make_flood_packet(payload=b"\x10\x20\x30", path=b"\x11"))
 
         with (
             patch.object(handler, "_calculate_tx_delay", return_value=0.0),
@@ -1426,7 +1514,7 @@ class TestPacketInjectionRouting:
         self._prepare_fast_tx(handler)
 
         pkt = _inject_from_wire(
-            _make_direct_packet(payload=b"\xAA\xBB", path=bytes([LOCAL_HASH, 0x44, 0x55]))
+            _make_direct_packet(payload=b"\xaa\xbb", path=bytes([LOCAL_HASH, 0x44, 0x55]))
         )
 
         with (
@@ -1440,9 +1528,7 @@ class TestPacketInjectionRouting:
         assert bytes(sent_pkt.path) == b"\x44\x55"
 
     async def test_direct_for_other_node_is_dropped(self, handler):
-        pkt = _inject_from_wire(
-            _make_direct_packet(payload=b"\xAA\xBB", path=b"\xFE\x44")
-        )
+        pkt = _inject_from_wire(_make_direct_packet(payload=b"\xaa\xbb", path=b"\xfe\x44"))
 
         with patch("repeater.engine.asyncio.sleep", new_callable=AsyncMock):
             await handler(pkt, {"snr": 2.0, "rssi": -90}, local_transmission=False)
@@ -1474,9 +1560,7 @@ class TestPacketInjectionRouting:
         assert original["duplicates"][0]["drop_reason"] == "Duplicate"
 
     async def test_transport_flood_injection_honors_transport_key_decision(self, handler):
-        pkt = _inject_from_wire(
-            _make_transport_flood_packet(payload=b"\x01\x02\x03\x04", path=b"")
-        )
+        pkt = _inject_from_wire(_make_transport_flood_packet(payload=b"\x01\x02\x03\x04", path=b""))
 
         with (
             patch.object(handler, "_check_transport_codes", return_value=(False, "denied")),
@@ -1490,16 +1574,14 @@ class TestPacketInjectionRouting:
     async def test_local_tx_then_rf_echo_is_duplicate(self, handler):
         self._prepare_fast_tx(handler)
 
-        local_pkt = _make_flood_packet(payload=b"\x0A\x0B\x0C", path=b"")
+        local_pkt = _make_flood_packet(payload=b"\x0a\x0b\x0c", path=b"")
 
         with (
             patch.object(handler, "_calculate_tx_delay", return_value=0.0),
             patch("repeater.engine.asyncio.sleep", new_callable=AsyncMock),
         ):
             await handler(local_pkt, {"snr": 0.0, "rssi": -50}, local_transmission=True)
-            rf_echo = _inject_from_wire(
-                _make_flood_packet(payload=b"\x0A\x0B\x0C", path=b"")
-            )
+            rf_echo = _inject_from_wire(_make_flood_packet(payload=b"\x0a\x0b\x0c", path=b""))
             await handler(rf_echo, {"snr": 0.0, "rssi": -70}, local_transmission=False)
 
         assert handler.dispatcher.send_packet.call_count == 1
@@ -1555,7 +1637,9 @@ class TestPacketInjectionRouting:
         assert bytes(sent_pkt.path) == b"\x44\x55"
 
     @pytest.mark.parametrize("payload_type", range(16))
-    async def test_all_payload_types_transport_flood_injection_forwards(self, handler, payload_type):
+    async def test_all_payload_types_transport_flood_injection_forwards(
+        self, handler, payload_type
+    ):
         self._prepare_fast_tx(handler)
         pkt = _inject_from_wire(
             _make_transport_flood_packet(
@@ -1579,7 +1663,9 @@ class TestPacketInjectionRouting:
         assert sent_pkt.transport_codes == [0x1111, 0x2222]
 
     @pytest.mark.parametrize("payload_type", range(16))
-    async def test_all_payload_types_transport_direct_injection_forwards(self, handler, payload_type):
+    async def test_all_payload_types_transport_direct_injection_forwards(
+        self, handler, payload_type
+    ):
         self._prepare_fast_tx(handler)
         pkt = _inject_from_wire(
             _make_transport_direct_packet(
@@ -1845,7 +1931,11 @@ class TestEngineTransmissionAndBackgroundLifecycle:
 
         with (
             patch("repeater.engine.time.time", return_value=100000.0),
-            patch("repeater.engine.asyncio.sleep", new_callable=AsyncMock, side_effect=asyncio.CancelledError),
+            patch(
+                "repeater.engine.asyncio.sleep",
+                new_callable=AsyncMock,
+                side_effect=asyncio.CancelledError,
+            ),
         ):
             with pytest.raises(asyncio.CancelledError):
                 await handler._background_timer_loop()
@@ -1870,7 +1960,11 @@ class TestEngineTransmissionAndBackgroundLifecycle:
 
         with (
             patch("repeater.engine.time.time", return_value=100000.0),
-            patch("repeater.engine.asyncio.sleep", new_callable=AsyncMock, side_effect=asyncio.CancelledError),
+            patch(
+                "repeater.engine.asyncio.sleep",
+                new_callable=AsyncMock,
+                side_effect=asyncio.CancelledError,
+            ),
         ):
             with pytest.raises(asyncio.CancelledError):
                 await handler._background_timer_loop()
@@ -1893,7 +1987,9 @@ class TestEngineTransmissionAndBackgroundLifecycle:
 
         with (
             patch("repeater.engine.time.time", return_value=100000.0),
-            patch("repeater.engine.asyncio.sleep", new_callable=AsyncMock, return_value=None) as sleep_mock,
+            patch(
+                "repeater.engine.asyncio.sleep", new_callable=AsyncMock, return_value=None
+            ) as sleep_mock,
             patch("repeater.engine.asyncio.create_task", side_effect=_fake_create_task),
         ):
             await handler._background_timer_loop()
@@ -1912,7 +2008,9 @@ class TestEngineTransmissionAndBackgroundLifecycle:
             await handler._record_noise_floor_async()
 
     @pytest.mark.asyncio
-    async def test_record_crc_errors_returns_without_storage_and_handles_storage_exception(self, handler):
+    async def test_record_crc_errors_returns_without_storage_and_handles_storage_exception(
+        self, handler
+    ):
         # No storage configured: should return early.
         handler.storage = None
         await handler._record_crc_errors_async()
@@ -1926,7 +2024,9 @@ class TestEngineTransmissionAndBackgroundLifecycle:
         await handler._record_crc_errors_async()
 
     @pytest.mark.asyncio
-    async def test_send_periodic_advert_handles_missing_handler_and_handler_exception(self, handler):
+    async def test_send_periodic_advert_handles_missing_handler_and_handler_exception(
+        self, handler
+    ):
         handler.send_advert_func = None
         await handler._send_periodic_advert_async()
 
@@ -1945,7 +2045,10 @@ class TestEngineRecordAndCleanupHelpers:
         handler.record_duplicate(pkt, rssi=-85, snr=1.0)
 
         assert handler.recent_packets[-1]["drop_reason"] == "Duplicate"
-        assert handler.recent_packets[-1]["packet_hash"] == pkt.calculate_packet_hash().hex().upper()[:16]
+        assert (
+            handler.recent_packets[-1]["packet_hash"]
+            == pkt.calculate_packet_hash().hex().upper()[:16]
+        )
 
     def test_record_duplicate_appends_when_recent_packets_empty(self, handler):
         handler.recent_packets.clear()
@@ -1960,7 +2063,7 @@ class TestEngineRecordAndCleanupHelpers:
     def test_record_duplicate_route_zero_maps_to_flood_counters(self, handler):
         pkt = _make_flood_packet(payload=b"\x75\x76")
         # Route nibble 0 is parsed as FLOOD in current protocol constants.
-        pkt.header = (0x00 << PH_TYPE_SHIFT)
+        pkt.header = 0x00 << PH_TYPE_SHIFT
 
         handler.record_duplicate(pkt, rssi=-90, snr=0.5)
 

@@ -1,7 +1,6 @@
 import json
 import logging
 import os
-import re
 import secrets
 from collections import deque
 from datetime import datetime
@@ -10,15 +9,13 @@ from typing import Callable, Optional
 
 import cherrypy
 import cherrypy_cors
-from pymc_core.protocol.utils import PAYLOAD_TYPES, ROUTE_TYPES
 
-from repeater import __version__
 from repeater.config import resolve_storage_dir
 from repeater.data_acquisition import SQLiteHandler
 
 from .api_endpoints import APIEndpoints
-from .auth import cherrypy_tool  # Import to register the tool
 from .auth.api_tokens import APITokenManager
+from .auth.cherrypy_tool import register_require_auth_tool
 from .auth.jwt_handler import JWTHandler
 from .auth_endpoints import AuthEndpoints
 
@@ -26,10 +23,11 @@ from .auth_endpoints import AuthEndpoints
 try:
     from repeater.data_acquisition.websocket_handler import (
         PacketWebSocket,
-        broadcast_packet,
         init_websocket,
     )
-    from .companion_ws_proxy import CompanionFrameWebSocket, set_daemon as _set_companion_daemon
+
+    from .companion_ws_proxy import CompanionFrameWebSocket
+    from .companion_ws_proxy import set_daemon as _set_companion_daemon
 
     WEBSOCKET_AVAILABLE = True
 except ImportError:
@@ -42,7 +40,6 @@ logger = logging.getLogger("HTTPServer")
 
 # In-memory log buffer
 class LogBuffer(logging.Handler):
-
     def __init__(self, max_lines=100):
         super().__init__()
         self.logs = deque(maxlen=max_lines)
@@ -107,7 +104,6 @@ class DocEndpoint:
 
 
 class StatsApp:
-
     def __init__(
         self,
         stats_getter: Optional[Callable] = None,
@@ -165,7 +161,12 @@ class StatsApp:
             raise cherrypy.NotFound()
 
         # Handle WebSocket routes
-        if args and len(args) >= 2 and args[0] == "ws" and args[1] in ("packets", "companion_frame"):
+        if (
+            args
+            and len(args) >= 2
+            and args[0] == "ws"
+            and args[1] in ("packets", "companion_frame")
+        ):
             # WebSocket tool will intercept this
             return ""
 
@@ -174,7 +175,6 @@ class StatsApp:
 
 
 class HTTPStatsServer:
-
     def __init__(
         self,
         host: str = "0.0.0.0",
@@ -288,6 +288,7 @@ class HTTPStatsServer:
     def start(self):
 
         try:
+            register_require_auth_tool()
 
             if self._cors_enabled:
                 self._setup_server_cors()

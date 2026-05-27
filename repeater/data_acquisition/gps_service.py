@@ -597,7 +597,9 @@ class GPSService:
         # Backward-compatible alias: use_gps_for_repeater_location=True means
         # GPS advertising is enabled for repeater-originated location fields.
         legacy_use_gps_location = gps_config.get("use_gps_for_repeater_location")
-        advertise_gps_default = bool(legacy_use_gps_location) if legacy_use_gps_location is not None else False
+        advertise_gps_default = (
+            bool(legacy_use_gps_location) if legacy_use_gps_location is not None else False
+        )
         self.advertise_gps_location = bool(
             gps_config.get("advertise_gps_location", advertise_gps_default)
         )
@@ -607,9 +609,7 @@ class GPSService:
             "location_precision_digits",
             gps_config.get("repeater_location_precision_digits"),
         )
-        self.location_precision_digits = _normalize_precision_digits(
-            precision_value
-        )
+        self.location_precision_digits = _normalize_precision_digits(precision_value)
         self.source = str(gps_config.get("source", "serial")).lower()
         self.device = gps_config.get("device", "/dev/serial0")
         self.baud_rate = int(gps_config.get("baud_rate", 9600))
@@ -631,7 +631,9 @@ class GPSService:
         # Backward-compatible alias: update_repeater_location_from_fix
         # predates persist_gps_fix_to_config.
         legacy_update_from_fix = gps_config.get("update_repeater_location_from_fix")
-        persist_fix_default = bool(legacy_update_from_fix) if legacy_update_from_fix is not None else False
+        persist_fix_default = (
+            bool(legacy_update_from_fix) if legacy_update_from_fix is not None else False
+        )
         self.persist_gps_fix_enabled = bool(
             gps_config.get("persist_gps_fix_to_config", persist_fix_default)
         )
@@ -639,9 +641,7 @@ class GPSService:
             "persist_gps_fix_interval_seconds",
             gps_config.get("location_update_interval_seconds", 600.0),
         )
-        self.persist_gps_fix_interval_seconds = max(
-            1.0, float(persist_interval_value)
-        )
+        self.persist_gps_fix_interval_seconds = max(1.0, float(persist_interval_value))
         self._location_update_callback = location_update_callback
         self._location_update_lock = threading.RLock()
         self._last_location_update_monotonic: Optional[float] = None
@@ -740,7 +740,9 @@ class GPSService:
             return value
         return round(value, self.location_precision_digits)
 
-    def _resolve_repeater_location(self, snapshot: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _resolve_repeater_location(
+        self, snapshot: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         fallback_lat = _to_float(self.repeater_config.get("latitude"))
         fallback_lon = _to_float(self.repeater_config.get("longitude"))
         fallback_location = {
@@ -980,9 +982,7 @@ class GPSService:
         snapshot["position_meta"] = {
             "source": position_source,
             "source_label": position_source_label,
-            "policy": "fallback_to_config"
-            if self.api_fallback_to_config_location
-            else "gps_only",
+            "policy": "fallback_to_config" if self.api_fallback_to_config_location else "gps_only",
             "manual_config_available": manual_position is not None,
             "gps_fix_valid": gps_fix_valid,
         }
@@ -1052,8 +1052,7 @@ class GPSService:
         with self._time_sync_lock:
             if (
                 self._last_time_sync_monotonic is not None
-                and now_monotonic - self._last_time_sync_monotonic
-                < self.time_sync_interval_seconds
+                and now_monotonic - self._last_time_sync_monotonic < self.time_sync_interval_seconds
             ):
                 return
 

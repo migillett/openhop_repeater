@@ -3,7 +3,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-_MODULE_PATH = Path(__file__).resolve().parents[1] / "repeater" / "data_acquisition" / "gps_service.py"
+_MODULE_PATH = (
+    Path(__file__).resolve().parents[1] / "repeater" / "data_acquisition" / "gps_service.py"
+)
 _SPEC = importlib.util.spec_from_file_location("repeater_gps_service", _MODULE_PATH)
 _MODULE = importlib.util.module_from_spec(_SPEC)
 assert _SPEC and _SPEC.loader
@@ -28,12 +30,8 @@ def test_nmea_parser_combines_rmc_gga_gsa_gsv_attributes():
     assert parser.ingest_sentence(
         _sentence("GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,")
     )
-    assert parser.ingest_sentence(
-        _sentence("GPGSA,A,3,04,05,09,12,24,25,29,,,,,,1.8,1.0,1.5")
-    )
-    assert parser.ingest_sentence(
-        _sentence("GPGSV,1,1,03,04,77,045,42,05,13,180,35,09,07,095,29")
-    )
+    assert parser.ingest_sentence(_sentence("GPGSA,A,3,04,05,09,12,24,25,29,,,,,,1.8,1.0,1.5"))
+    assert parser.ingest_sentence(_sentence("GPGSV,1,1,03,04,77,045,42,05,13,180,35,09,07,095,29"))
 
     snapshot = parser.snapshot()
 
@@ -377,6 +375,7 @@ def test_gps_service_reflects_runtime_manual_location_updates():
     assert snapshot["gps_position"]["latitude"] == 42.83538333
     assert snapshot["gps_position"]["longitude"] == -71.1076
     assert snapshot["position_meta"]["source"] == "manual_config"
+
 
 def test_repeater_location_uses_config_when_gps_opt_in_disabled():
     service = GPSService(

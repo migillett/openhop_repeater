@@ -22,14 +22,14 @@ class SensorManager:
         self.log = log or logging.getLogger(self.__class__.__name__)
         self.registry = registry
         self.sensors = []
-        
+
         # Background polling
         self._poll_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._latest_readings: List[Dict[str, Any]] = []
         self._readings_lock = threading.RLock()
         self._running = False
-        
+
         self.reload()
 
     def _get_sensor_definitions(self) -> List[Dict[str, Any]]:
@@ -81,17 +81,17 @@ class SensorManager:
         if self._running:
             return
         self.reload()
-        
+
         # Start background polling thread if enabled and sensors exist
         section = self.config.get("sensors", {})
         if not isinstance(section, dict) or not section.get("enabled", False):
             self.log.debug("Sensor manager disabled in config")
             return
-        
+
         if not self.sensors:
             self.log.debug("No sensors loaded; skipping background polling")
             return
-        
+
         self._stop_event.clear()
         self._poll_thread = threading.Thread(
             target=self._poll_loop, name="sensor-manager", daemon=True
@@ -137,9 +137,9 @@ class SensorManager:
                 poll_interval = float(section.get("poll_interval_seconds", 30.0))
             except (TypeError, ValueError):
                 pass
-        
+
         self.log.debug("Sensor polling loop started (interval=%.1f sec)", poll_interval)
-        
+
         while not self._stop_event.is_set():
             try:
                 readings = self.read_all()
@@ -147,10 +147,10 @@ class SensorManager:
                     self._latest_readings = readings
             except Exception as exc:
                 self.log.warning("Sensor poll cycle failed: %s", exc)
-            
+
             # Wait for next poll or stop signal
             self._stop_event.wait(poll_interval)
-        
+
         self.log.debug("Sensor polling loop stopped")
 
     def get_summary(self) -> Dict[str, Any]:
@@ -161,11 +161,11 @@ class SensorManager:
                 poll_interval = float(section.get("poll_interval_seconds", 30.0))
             except (TypeError, ValueError):
                 pass
-        
+
         # Get cached readings (or empty list if not running)
         with self._readings_lock:
             readings = list(self._latest_readings) if self._latest_readings else []
-        
+
         return {
             "enabled": bool(isinstance(section, dict) and section.get("enabled", False)),
             "poll_interval_seconds": poll_interval,

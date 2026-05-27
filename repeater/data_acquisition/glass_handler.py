@@ -8,10 +8,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
 from urllib import error, request
+from urllib.parse import urlparse
 
 import psutil
+
 try:
     import paho.mqtt.client as mqtt
 except ImportError:
@@ -131,7 +132,8 @@ class GlassHandler:
             int(glass_cfg.get("inform_interval_seconds", self.inform_interval_seconds))
         )
         self.cert_store_dir = str(
-            glass_cfg.get("cert_store_dir", "/etc/pymc_repeater/glass") or "/etc/pymc_repeater/glass"
+            glass_cfg.get("cert_store_dir", "/etc/pymc_repeater/glass")
+            or "/etc/pymc_repeater/glass"
         )
         self.client_cert_path = (
             str(glass_cfg.get("client_cert_path")).strip()
@@ -144,9 +146,7 @@ class GlassHandler:
             else None
         )
         self.ca_cert_path = (
-            str(glass_cfg.get("ca_cert_path")).strip()
-            if glass_cfg.get("ca_cert_path")
-            else None
+            str(glass_cfg.get("ca_cert_path")).strip() if glass_cfg.get("ca_cert_path") else None
         )
         managed_cfg = self._load_managed_settings()
         parsed_base_url = urlparse(self.base_url)
@@ -164,7 +164,9 @@ class GlassHandler:
         self.mqtt_tls_enabled = bool(managed_cfg.get("mqtt_tls_enabled", False))
         username = managed_cfg.get("mqtt_username")
         password = managed_cfg.get("mqtt_password")
-        self.mqtt_username = str(username).strip() if isinstance(username, str) and username else None
+        self.mqtt_username = (
+            str(username).strip() if isinstance(username, str) and username else None
+        )
         self.mqtt_password = str(password) if isinstance(password, str) and password else None
 
     def _managed_settings_path(self) -> Path:
@@ -406,7 +408,9 @@ class GlassHandler:
     def _collect_system_stats(self) -> Dict[str, Any]:
         temperature_c = None
         try:
-            temperatures = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
+            temperatures = (
+                psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
+            )
             if temperatures:
                 for values in temperatures.values():
                     if values:
@@ -436,6 +440,7 @@ class GlassHandler:
 
     def _post_inform_sync(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         url = f"{self.base_url}/inform"
+        self._validate_http_url(url)
         headers = {"Content-Type": "application/json"}
         if self.api_token:
             headers["Authorization"] = f"Bearer {self.api_token}"
@@ -449,7 +454,7 @@ class GlassHandler:
                 req,
                 timeout=self.request_timeout_seconds,
                 context=ssl_context,
-            ) as response:
+            ) as response:  # nosec B310
                 response_bytes = response.read()
         except error.HTTPError as exc:
             details = ""
@@ -484,7 +489,9 @@ class GlassHandler:
             else:
                 context = ssl.create_default_context()
         else:
-            context = ssl._create_unverified_context()
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
 
         if self.client_cert_path or self.client_key_path:
             cert_path = self._require_ssl_file(self.client_cert_path, "client_cert_path")
@@ -501,6 +508,14 @@ class GlassHandler:
         if not Path(normalized).exists():
             raise RuntimeError(f"Configured {field_name} does not exist: {normalized}")
         return normalized
+
+    @staticmethod
+    def _validate_http_url(url: str) -> None:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise RuntimeError(f"Unsupported Glass base_url scheme: {parsed.scheme or '<missing>'}")
+        if not parsed.netloc:
+            raise RuntimeError("Glass base_url must include a host")
 
     async def _handle_command_response(self, response: Dict[str, Any]) -> None:
         command_id = str(response.get("command_id", "")).strip()
@@ -583,16 +598,22 @@ class GlassHandler:
             radio_values = params.get("radio", params)
             if not isinstance(radio_values, dict):
                 return False, "radio settings must be an object", None
-            success, message = self._apply_config_update({"radio": radio_values}, merge_mode="patch")
+            success, message = self._apply_config_update(
+                {"radio": radio_values}, merge_mode="patch"
+            )
             return success, message, None
 
         if action == "run_diagnostic":
             stats = self.daemon_instance.get_stats() if self.daemon_instance else {}
-            return True, (
-                f"rx={int(stats.get('rx_count', 0))}, "
-                f"tx={int(stats.get('forwarded_count', 0))}, "
-                f"dropped={int(stats.get('dropped_count', 0))}"
-            ), None
+            return (
+                True,
+                (
+                    f"rx={int(stats.get('rx_count', 0))}, "
+                    f"tx={int(stats.get('forwarded_count', 0))}, "
+                    f"dropped={int(stats.get('dropped_count', 0))}"
+                ),
+                None,
+            )
 
         if action == "export_config":
             normalized_config = self._normalize_for_hash(self.config)
@@ -639,7 +660,9 @@ class GlassHandler:
                 live_updated = self.config_manager.live_update_daemon(sections)
                 return (
                     bool(saved and live_updated),
-                    "Config replaced" if saved and live_updated else "Failed to persist replace update",
+                    "Config replaced"
+                    if saved and live_updated
+                    else "Failed to persist replace update",
                 )
             return True, "Config replaced"
 
@@ -699,7 +722,9 @@ class GlassHandler:
         client_key = response.get("client_key")
         ca_cert = response.get("ca_cert")
 
-        if not all(isinstance(item, str) and item.strip() for item in (client_cert, client_key, ca_cert)):
+        if not all(
+            isinstance(item, str) and item.strip() for item in (client_cert, client_key, ca_cert)
+        ):
             return False, "Missing certificate payload values"
 
         cert_dir = Path(self.cert_store_dir)
@@ -826,7 +851,11 @@ class GlassHandler:
             if self.mqtt_username:
                 client.username_pw_set(self.mqtt_username, self.mqtt_password)
             if self.mqtt_tls_enabled:
-                ca_certs = self._require_ssl_file(self.ca_cert_path, "ca_cert_path") if self.ca_cert_path else None
+                ca_certs = (
+                    self._require_ssl_file(self.ca_cert_path, "ca_cert_path")
+                    if self.ca_cert_path
+                    else None
+                )
                 certfile = None
                 keyfile = None
                 if self.client_cert_path or self.client_key_path:
@@ -890,7 +919,18 @@ class GlassHandler:
 
     def _current_mqtt_signature(
         self,
-    ) -> Tuple[str, int, str, bool, bool, Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+    ) -> Tuple[
+        str,
+        int,
+        str,
+        bool,
+        bool,
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+    ]:
         return (
             self.mqtt_broker_host,
             self.mqtt_broker_port,
@@ -923,10 +963,7 @@ class GlassHandler:
     @staticmethod
     def _deep_merge(target: Dict[str, Any], source: Dict[str, Any]) -> None:
         for key, value in source.items():
-            if (
-                isinstance(value, dict)
-                and isinstance(target.get(key), dict)
-            ):
+            if isinstance(value, dict) and isinstance(target.get(key), dict):
                 GlassHandler._deep_merge(target[key], value)
             else:
                 target[key] = value

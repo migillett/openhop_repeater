@@ -1,15 +1,12 @@
 import logging
-import time
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-import yaml
 
 logger = logging.getLogger(__name__)
 
 
 class MeshCLI:
-
     def __init__(
         self,
         config_path: str,
@@ -33,6 +30,7 @@ class MeshCLI:
 
         # Store event loop reference for thread-safe scheduling
         import asyncio
+
         try:
             self._event_loop = asyncio.get_running_loop()
         except RuntimeError:

@@ -3,11 +3,11 @@ import functools
 import logging
 import os
 import signal
-import sys
 import socket
+import sys
 import time
 
-from repeater.companion.utils import validate_companion_node_name, normalize_companion_identity_key
+from repeater.companion.utils import normalize_companion_identity_key, validate_companion_node_name
 from repeater.config import NullRadio, get_radio_for_board, load_config, save_config
 from repeater.config_manager import ConfigManager
 from repeater.data_acquisition.glass_handler import GlassHandler
@@ -31,7 +31,6 @@ logger = logging.getLogger("RepeaterDaemon")
 
 
 class RepeaterDaemon:
-
     def __init__(self, config: dict, radio=None):
 
         self.config = config
@@ -76,14 +75,14 @@ class RepeaterDaemon:
 
         logger.info(f"Initializing repeater: {self.config['repeater']['node_name']}")
 
-        #-----------------------------------------------
-        # Get the actual Network IP Address 
+        # -----------------------------------------------
+        # Get the actual Network IP Address
         try:
             # This looks for the IP assigned to the default hostname
             host_name = socket.gethostname()
             # We try to get the IP associated with the hostname
             self.network_ip = socket.gethostbyname(host_name)
-            
+
             # If that still gives 127.0.x.x, let's try a different internal method
             if self.network_ip.startswith("127."):
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -96,7 +95,7 @@ class RepeaterDaemon:
             self.network_ip = "Unknown"
 
         logger.info(f"System Network IP: {self.network_ip}")
-        #-----------------------------------------------
+        # -----------------------------------------------
 
         if self.radio is None:
             radio_type_raw = self.config.get("radio_type")
@@ -202,7 +201,9 @@ class RepeaterDaemon:
             self.dispatcher._is_own_packet = lambda pkt: False
 
             self.repeater_handler = RepeaterHandler(
-                self.config, self.dispatcher, self.local_hash,
+                self.config,
+                self.dispatcher,
+                self.local_hash,
                 local_hash_bytes=self.local_hash_bytes,
                 send_advert_func=self.send_advert,
             )
@@ -407,7 +408,9 @@ class RepeaterDaemon:
                 and self.repeater_handler.storage
                 and hasattr(self.repeater_handler.storage, "set_glass_publisher")
             ):
-                self.repeater_handler.storage.set_glass_publisher(self.glass_handler.publish_telemetry)
+                self.repeater_handler.storage.set_glass_publisher(
+                    self.glass_handler.publish_telemetry
+                )
 
         except Exception as e:
             logger.error(f"Failed to initialize dispatcher: {e}")
@@ -426,7 +429,7 @@ class RepeaterDaemon:
                 identity_key = room_config.get("identity_key")
 
                 if not name or not identity_key:
-                    logger.warning(f"Skipping room server config: missing name or identity_key")
+                    logger.warning("Skipping room server config: missing name or identity_key")
                     continue
 
                 # Convert identity_key to bytes if it's a hex string
@@ -477,7 +480,7 @@ class RepeaterDaemon:
     async def _load_companion_identities(self) -> None:
         """Load companion identities from config and create CompanionBridge + frame server for each."""
         from pymc_core import LocalIdentity
-        from pymc_core.companion.models import Channel, Contact
+        from pymc_core.companion.models import Channel
 
         from repeater.companion import CompanionFrameServer, RepeaterCompanionBridge
 
@@ -511,7 +514,9 @@ class RepeaterDaemon:
 
                 if isinstance(identity_key, str):
                     try:
-                        identity_key_bytes = bytes.fromhex(normalize_companion_identity_key(identity_key))
+                        identity_key_bytes = bytes.fromhex(
+                            normalize_companion_identity_key(identity_key)
+                        )
                     except ValueError as e:
                         logger.error(f"Companion '{name}' identity_key invalid hex: {e}")
                         continue
@@ -535,11 +540,12 @@ class RepeaterDaemon:
                 node_name = settings.get("node_name", name)
                 tcp_port = settings.get("tcp_port", 5000)
                 bind_address = settings.get("bind_address", "0.0.0.0")
-                tcp_timeout_raw = settings.get("tcp_timeout", 8 * 60 * 60) # 8 hours
+                tcp_timeout_raw = settings.get("tcp_timeout", 8 * 60 * 60)  # 8 hours
                 client_idle_timeout_sec = None if tcp_timeout_raw == 0 else int(tcp_timeout_raw)
 
                 def _make_sync_node_name_to_config(companion_name: str):
                     """Return a callback that syncs node_name to config for this companion (binds name at creation)."""
+
                     def _sync(new_node_name: str) -> None:
                         try:
                             validated = validate_companion_node_name(new_node_name)
@@ -555,6 +561,7 @@ class RepeaterDaemon:
                                 if config_path:
                                     save_config(self.config, config_path)
                                 break
+
                     return _sync
 
                 bridge = RepeaterCompanionBridge(

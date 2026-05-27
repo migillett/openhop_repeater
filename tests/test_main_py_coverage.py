@@ -166,7 +166,7 @@ async def test_deliver_control_data_filters_non_discovery_and_pushes_valid():
     fs_ok.push_control_data.assert_not_awaited()
 
     payload = bytes([0x90, 0x00, 0x11, 0x22, 0x33, 0x44])
-    await daemon.deliver_control_data(1.0, -70, 2, b"\xAA\xBB", payload)
+    await daemon.deliver_control_data(1.0, -70, 2, b"\xaa\xbb", payload)
     fs_ok.push_control_data.assert_awaited_once()
 
 
@@ -182,7 +182,7 @@ async def test_trace_complete_for_companions_requires_valid_lengths():
     fs.push_trace_data_async.assert_not_awaited()
 
     parsed = {
-        "trace_path_bytes": b"\xAA\xBB\xCC\xDD",
+        "trace_path_bytes": b"\xaa\xbb\xcc\xdd",
         "flags": 0,
         "tag": 1,
         "auth_code": 2,
@@ -218,7 +218,9 @@ async def test_send_advert_branches_and_success_path():
     # Missing dispatcher/local identity
     assert await daemon.send_advert() is False
 
-    daemon.dispatcher = SimpleNamespace(send_packet=AsyncMock(), packet_filter=SimpleNamespace(track_packet=MagicMock()))
+    daemon.dispatcher = SimpleNamespace(
+        send_packet=AsyncMock(), packet_filter=SimpleNamespace(track_packet=MagicMock())
+    )
     daemon.local_identity = _FakeIdentity(b"\x21" + b"x" * 31)
     daemon.config["repeater"]["mode"] = "no_tx"
     assert await daemon.send_advert() is False
@@ -229,7 +231,7 @@ async def test_send_advert_branches_and_success_path():
         get_repeater_location=lambda: {"latitude": 9.1, "longitude": 8.2, "source": "gps"}
     )
 
-    packet = SimpleNamespace(calculate_packet_hash=lambda: b"\xAB" * 16)
+    packet = SimpleNamespace(calculate_packet_hash=lambda: b"\xab" * 16)
     with patch("pymc_core.protocol.PacketBuilder.create_advert", return_value=packet):
         ok = await daemon.send_advert()
 
@@ -254,10 +256,14 @@ def test_update_repeater_location_from_gps_branches():
     assert daemon.config["repeater"]["latitude"] == 3.5
     assert daemon.config["repeater"]["longitude"] == 4.5
 
-    daemon.config_manager = SimpleNamespace(update_and_save=MagicMock(return_value={"success": False, "error": "nope"}))
+    daemon.config_manager = SimpleNamespace(
+        update_and_save=MagicMock(return_value={"success": False, "error": "nope"})
+    )
     assert daemon._update_repeater_location_from_gps({"latitude": 5.5, "longitude": 6.5}) is False
 
-    daemon.config_manager = SimpleNamespace(update_and_save=MagicMock(return_value={"success": True}))
+    daemon.config_manager = SimpleNamespace(
+        update_and_save=MagicMock(return_value={"success": True})
+    )
     assert daemon._update_repeater_location_from_gps({"latitude": 6.5, "longitude": 7.5}) is True
 
 

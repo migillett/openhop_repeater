@@ -26,14 +26,14 @@ from .base import SensorBase
 from .registry import SensorRegistry
 
 # Register map
-_REG_STATUS = 0x02   # 1 byte  — charge state flags
-_REG_VBUS   = 0x10   # 6 bytes — input (VBUS) voltage, current, power
-_REG_BATT   = 0x20   # 12 bytes — pack voltage, current, percent, mAh, time
-_REG_CELLS  = 0x30   # 8 bytes — four cell voltages (LE uint16 each)
+_REG_STATUS = 0x02  # 1 byte  — charge state flags
+_REG_VBUS = 0x10  # 6 bytes — input (VBUS) voltage, current, power
+_REG_BATT = 0x20  # 12 bytes — pack voltage, current, percent, mAh, time
+_REG_CELLS = 0x30  # 8 bytes — four cell voltages (LE uint16 each)
 
 # Charge state flag bits
 _FLAG_FAST_CHARGE = 0x40
-_FLAG_CHARGING    = 0x80
+_FLAG_CHARGING = 0x80
 _FLAG_DISCHARGING = 0x20
 
 
@@ -50,7 +50,7 @@ class WaveshareUpsESensor(SensorBase):
 
         addr = self.settings.get("i2c_address", 0x2D)
         self.i2c_address = int(addr, 0) if isinstance(addr, str) else int(addr)
-        self.bus_number  = int(self.settings.get("bus_number", 1))
+        self.bus_number = int(self.settings.get("bus_number", 1))
         self.low_cell_mv = int(self.settings.get("low_cell_mv", 3150))
 
         self.available = False
@@ -60,6 +60,7 @@ class WaveshareUpsESensor(SensorBase):
 
         try:
             import smbus2  # type: ignore[import-not-found]
+
             self._smbus2 = smbus2
 
             bus = smbus2.SMBus(self.bus_number)
@@ -91,50 +92,56 @@ class WaveshareUpsESensor(SensorBase):
             bus = self._smbus2.SMBus(self.bus_number)
             try:
                 status = bus.read_i2c_block_data(self.i2c_address, _REG_STATUS, 1)[0]
-                vb     = bus.read_i2c_block_data(self.i2c_address, _REG_VBUS,   6)
-                bd     = bus.read_i2c_block_data(self.i2c_address, _REG_BATT,  12)
-                cd     = bus.read_i2c_block_data(self.i2c_address, _REG_CELLS,  8)
+                vb = bus.read_i2c_block_data(self.i2c_address, _REG_VBUS, 6)
+                bd = bus.read_i2c_block_data(self.i2c_address, _REG_BATT, 12)
+                cd = bus.read_i2c_block_data(self.i2c_address, _REG_CELLS, 8)
             finally:
                 bus.close()
 
             # Charge state
-            if   status & _FLAG_FAST_CHARGE: charge_state = "fast_charging"
-            elif status & _FLAG_CHARGING:    charge_state = "charging"
-            elif status & _FLAG_DISCHARGING: charge_state = "discharging"
-            else:                            charge_state = "idle"
+            if status & _FLAG_FAST_CHARGE:
+                charge_state = "fast_charging"
+            elif status & _FLAG_CHARGING:
+                charge_state = "charging"
+            elif status & _FLAG_DISCHARGING:
+                charge_state = "discharging"
+            else:
+                charge_state = "idle"
 
             # VBUS (input power from charger)
             vbus_voltage_mv = _u16le(vb, 0)
             vbus_current_ma = _u16le(vb, 2)
-            vbus_power_mw   = _u16le(vb, 4)
+            vbus_power_mw = _u16le(vb, 4)
 
             # Battery pack
             batt_voltage_mv = _u16le(bd, 0)
             batt_current_ma = _u16le(bd, 2)
-            if batt_current_ma > 0x7FFF:   # signed 16-bit
+            if batt_current_ma > 0x7FFF:  # signed 16-bit
                 batt_current_ma -= 0xFFFF
-            batt_percent    = _u16le(bd, 4)
-            remaining_mah   = _u16le(bd, 6)
-            time_remaining  = _u16le(bd, 8)
-            time_to_full    = _u16le(bd, 10)
+            batt_percent = _u16le(bd, 4)
+            remaining_mah = _u16le(bd, 6)
+            time_remaining = _u16le(bd, 8)
+            time_to_full = _u16le(bd, 10)
 
             # Per-cell voltages (4 cells)
             cells_mv = [
-                _u16le(cd, 0), _u16le(cd, 2),
-                _u16le(cd, 4), _u16le(cd, 6),
+                _u16le(cd, 0),
+                _u16le(cd, 2),
+                _u16le(cd, 4),
+                _u16le(cd, 6),
             ]
 
             result: Dict[str, Any] = {
-                "charge_state":           charge_state,
-                "battery_voltage_mv":     batt_voltage_mv,
-                "battery_current_ma":     batt_current_ma,
-                "battery_percent":        batt_percent,
+                "charge_state": charge_state,
+                "battery_voltage_mv": batt_voltage_mv,
+                "battery_current_ma": batt_current_ma,
+                "battery_percent": batt_percent,
                 "remaining_capacity_mah": remaining_mah,
-                "vbus_voltage_mv":        vbus_voltage_mv,
-                "vbus_current_ma":        vbus_current_ma,
-                "vbus_power_mw":          vbus_power_mw,
-                "cell_voltages_mv":       cells_mv,
-                "low_cell_warning":       any(0 < v < self.low_cell_mv for v in cells_mv),
+                "vbus_voltage_mv": vbus_voltage_mv,
+                "vbus_current_ma": vbus_current_ma,
+                "vbus_power_mw": vbus_power_mw,
+                "cell_voltages_mv": cells_mv,
+                "low_cell_warning": any(0 < v < self.low_cell_mv for v in cells_mv),
             }
 
             # Only include whichever time estimate is relevant

@@ -54,7 +54,7 @@ def test_fetch_url_success_and_rate_limit(monkeypatch):
             return b"ok"
 
     monkeypatch.setattr(ue.urllib.request, "urlopen", lambda *args, **kwargs: _Resp())
-    assert ue._fetch_url("https://example.com") == "ok"
+    assert ue._fetch_url("https://api.github.com/test") == "ok"
 
     reset = int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp())
     hdrs = {"X-RateLimit-Reset": str(reset)}
@@ -242,7 +242,9 @@ def test_channels_set_channel_and_changelog(cherrypy_ctx, isolated_state, monkey
     assert ok["channel"] == "dev"
 
     request.method = "GET"
-    monkeypatch.setattr(ue, "_fetch_changelog", lambda channel, installed, max_commits: [{"title": "t"}])
+    monkeypatch.setattr(
+        ue, "_fetch_changelog", lambda channel, installed, max_commits: [{"title": "t"}]
+    )
     c = api.changelog(channel="dev", max="5")
     assert c["success"] is True
     assert c["commits"][0]["title"] == "t"
@@ -376,9 +378,7 @@ def test_do_install_root_install_command_failure_sets_error(isolated_state, monk
             self.cmd = cmd
             self.stdout = []
             self.returncode = (
-                1
-                if any(isinstance(x, str) and "git+https://github.com" in x for x in cmd)
-                else 0
+                1 if any(isinstance(x, str) and "git+https://github.com" in x for x in cmd) else 0
             )
 
         def wait(self):
@@ -402,7 +402,9 @@ def test_do_install_wrapper_success_then_restart_failure(isolated_state, monkeyp
     monkeypatch.setattr(ue, "_cleanup_stale_dist_info", lambda *args, **kwargs: None)
     monkeypatch.setattr(ue.time, "sleep", lambda _s: None)
     monkeypatch.setattr(ue.os.path, "isfile", lambda p: p == "/usr/local/bin/pymc-do-upgrade")
-    monkeypatch.setattr("repeater.service_utils.restart_service", lambda: (False, "systemctl failed"))
+    monkeypatch.setattr(
+        "repeater.service_utils.restart_service", lambda: (False, "systemctl failed")
+    )
 
     class _Proc:
         def __init__(self, cmd):

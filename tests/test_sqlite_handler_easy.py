@@ -176,9 +176,7 @@ def test_verify_api_token_last_used_throttle(tmp_path, monkeypatch):
 
     now = {"v": 1000.0}
 
-    monkeypatch.setattr(
-        "repeater.data_acquisition.sqlite_handler.time.time", lambda: now["v"]
-    )
+    monkeypatch.setattr("repeater.data_acquisition.sqlite_handler.time.time", lambda: now["v"])
 
     token_id = h.create_api_token("svc-throttle", "hash-throttle")
     assert token_id > 0

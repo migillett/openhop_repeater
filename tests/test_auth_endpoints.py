@@ -35,8 +35,14 @@ def _jwt_ok_payload():
 
 def _jwt_handler(ok=True):
     if ok:
-        return SimpleNamespace(verify_jwt=lambda _token: _jwt_ok_payload(), create_jwt=lambda u, c: "jwt-new", expiry_minutes=15)
-    return SimpleNamespace(verify_jwt=lambda _token: None, create_jwt=lambda u, c: "jwt-new", expiry_minutes=15)
+        return SimpleNamespace(
+            verify_jwt=lambda _token: _jwt_ok_payload(),
+            create_jwt=lambda u, c: "jwt-new",
+            expiry_minutes=15,
+        )
+    return SimpleNamespace(
+        verify_jwt=lambda _token: None, create_jwt=lambda u, c: "jwt-new", expiry_minutes=15
+    )
 
 
 def _token_mgr():
@@ -78,7 +84,9 @@ def test_tokens_index_get_post_and_error_paths(cp_ctx):
     # GET exception
     _req, _resp, cfg = cp_ctx(method="GET", headers={"Authorization": "Bearer ok"})
     cfg["jwt_handler"] = _jwt_handler(ok=True)
-    cfg["token_manager"] = SimpleNamespace(list_tokens=lambda: (_ for _ in ()).throw(RuntimeError("db")))
+    cfg["token_manager"] = SimpleNamespace(
+        list_tokens=lambda: (_ for _ in ()).throw(RuntimeError("db"))
+    )
     out = endpoint.index()
     assert out["success"] is False
     assert cherrypy.response.status == 500
@@ -144,7 +152,11 @@ def test_tokens_default_delete_paths(cp_ctx):
 
 
 def test_login_paths(cp_ctx):
-    auth = AuthEndpoints(config={"repeater": {"security": {"admin_password": "pw"}}}, jwt_handler=_jwt_handler(ok=True), token_manager=_token_mgr())
+    auth = AuthEndpoints(
+        config={"repeater": {"security": {"admin_password": "pw"}}},
+        jwt_handler=_jwt_handler(ok=True),
+        token_manager=_token_mgr(),
+    )
 
     cp_ctx(method="OPTIONS")
     assert auth.login() == b""
@@ -153,12 +165,18 @@ def test_login_paths(cp_ctx):
     out = json.loads(auth.login().decode())
     assert out["success"] is False
 
-    cp_ctx(method="POST", body=json.dumps({"username": "admin", "password": "pw", "client_id": "abc"}).encode())
+    cp_ctx(
+        method="POST",
+        body=json.dumps({"username": "admin", "password": "pw", "client_id": "abc"}).encode(),
+    )
     out = json.loads(auth.login().decode())
     assert out["success"] is True
     assert out["token"] == "jwt-new"
 
-    cp_ctx(method="POST", body=json.dumps({"username": "admin", "password": "bad", "client_id": "abc"}).encode())
+    cp_ctx(
+        method="POST",
+        body=json.dumps({"username": "admin", "password": "bad", "client_id": "abc"}).encode(),
+    )
     out = json.loads(auth.login().decode())
     assert out["success"] is False
 
@@ -201,7 +219,9 @@ def test_refresh_paths(cp_ctx):
     assert out["success"] is True  # falls back to payload client_id
 
     # api token path
-    _req, _resp, cfg = cp_ctx(method="POST", headers={"X-API-Key": "k"}, body=json.dumps({"client_id": "z"}).encode())
+    _req, _resp, cfg = cp_ctx(
+        method="POST", headers={"X-API-Key": "k"}, body=json.dumps({"client_id": "z"}).encode()
+    )
     cfg["jwt_handler"] = _jwt_handler(ok=False)
     cfg["token_manager"] = _token_mgr()
     out = json.loads(auth.refresh().decode())
@@ -269,7 +289,9 @@ def test_change_password_paths(cp_ctx):
     _req, _resp, cfg = cp_ctx(
         method="POST",
         headers={"Authorization": "Bearer ok"},
-        body=json.dumps({"current_password": "old-password", "new_password": "new-password"}).encode(),
+        body=json.dumps(
+            {"current_password": "old-password", "new_password": "new-password"}
+        ).encode(),
     )
     cfg["jwt_handler"] = _jwt_handler(ok=True)
     cfg["token_manager"] = _token_mgr()
@@ -286,7 +308,9 @@ def test_change_password_paths(cp_ctx):
     _req, _resp, cfg = cp_ctx(
         method="POST",
         headers={"Authorization": "Bearer ok"},
-        body=json.dumps({"current_password": "old-password", "new_password": "new-password"}).encode(),
+        body=json.dumps(
+            {"current_password": "old-password", "new_password": "new-password"}
+        ).encode(),
     )
     cfg["jwt_handler"] = _jwt_handler(ok=True)
     cfg["token_manager"] = _token_mgr()

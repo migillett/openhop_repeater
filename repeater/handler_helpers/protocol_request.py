@@ -14,7 +14,6 @@ from pymc_core.node.handlers.protocol_request import (
     REQ_TYPE_GET_NEIGHBOURS,
     REQ_TYPE_GET_OWNER_INFO,
     REQ_TYPE_GET_STATUS,
-    REQ_TYPE_GET_TELEMETRY_DATA,
     SERVER_RESPONSE_DELAY_MS,
     ProtocolRequestHandler,
 )
@@ -43,23 +42,23 @@ class ProtocolRequestHelper:
         self.engine = engine
         self.neighbor_tracker = neighbor_tracker
         self.config = config or {}
-        
+
         # Dictionary of core handlers keyed by dest_hash
         self.handlers = {}
-        
+
     def register_identity(self, name: str, identity, identity_type: str = "repeater"):
 
         hash_byte = identity.get_public_key()[0]
-        
+
         # Get ACL for this identity
         identity_acl = self.acl_dict.get(hash_byte)
         if not identity_acl:
             logger.warning(f"Cannot register identity '{name}': no ACL for hash 0x{hash_byte:02X}")
             return
-        
+
         # Create ACL contacts wrapper
         acl_contacts = self._create_acl_contacts_wrapper(identity_acl)
-        
+
         # Build request handlers dict
         request_handlers = {
             REQ_TYPE_GET_STATUS: self._handle_get_status,
@@ -67,7 +66,7 @@ class ProtocolRequestHelper:
             REQ_TYPE_GET_NEIGHBOURS: self._handle_get_neighbours,
             REQ_TYPE_GET_OWNER_INFO: self._handle_get_owner_info,
         }
-        
+
         # Create core handler
         handler = ProtocolRequestHandler(
             local_identity=identity,
@@ -76,14 +75,14 @@ class ProtocolRequestHelper:
             request_handlers=request_handlers,
             log_fn=logger.info,
         )
-        
+
         self.handlers[hash_byte] = {
             "handler": handler,
             "identity": identity,
             "name": name,
             "type": identity_type,
         }
-        
+
         logger.info(f"Registered protocol request handler for '{name}': hash=0x{hash_byte:02X}")
 
     def _create_acl_contacts_wrapper(self, acl):
@@ -92,47 +91,47 @@ class ProtocolRequestHelper:
         class ACLContactsWrapper:
             def __init__(self, identity_acl):
                 self._acl = identity_acl
-            
+
             @property
             def contacts(self):
                 return self._acl.get_all_clients()
-        
+
         return ACLContactsWrapper(acl)
-    
+
     def _get_client_from_acl(self, acl, src_hash: int):
         """Get client from ACL by source hash."""
         for client_info in acl.get_all_clients():
             if client_info.id.get_public_key()[0] == src_hash:
                 return client_info
         return None
-    
+
     async def process_request_packet(self, packet):
 
         try:
             if len(packet.payload) < 2:
                 return False
-            
+
             dest_hash = packet.payload[0]
-            
+
             handler_info = self.handlers.get(dest_hash)
             if not handler_info:
                 return False
-            
+
             # Let core handler build response
             response_packet = await handler_info["handler"](packet)
-            
+
             # Send response after delay
             if response_packet and self.packet_injector:
                 await asyncio.sleep(SERVER_RESPONSE_DELAY_MS / 1000.0)
                 await self.packet_injector(response_packet, wait_for_ack=False)
-            
+
             packet.mark_do_not_retransmit()
             return True
-            
+
         except Exception as e:
             logger.error(f"Error processing protocol request: {e}", exc_info=True)
             return False
-    
+
     def _handle_get_status(self, client, timestamp: int, req_data: bytes):
         """Build 56-byte RepeaterStats (firmware layout from MeshCore simple_repeater/MyMesh.h)."""
         # RepeaterStats: uint16 batt, uint16 curr_tx_queue_len, int16 noise_floor, int16 last_rssi,
@@ -192,11 +191,7 @@ class ProtocolRequestHelper:
         n_recv_direct = getattr(self.engine, "recv_direct_count", 0) if self.engine else 0
         n_direct_dups = getattr(self.engine, "direct_dup_count", 0) if self.engine else 0
         n_flood_dups = getattr(self.engine, "flood_dup_count", 0) if self.engine else 0
-        n_recv_errors = (
-            int(getattr(self.radio, "crc_error_count", 0) or 0)
-            if self.radio
-            else 0
-        )
+        n_recv_errors = int(getattr(self.radio, "crc_error_count", 0) or 0) if self.radio else 0
 
         # Pack 56-byte RepeaterStats (layout matches firmware)
         stats = struct.pack(
@@ -235,8 +230,10 @@ class ProtocolRequestHelper:
 
     def _make_handle_get_access_list(self, identity_acl):
         """Create a closure for GET_ACCESS_LIST bound to a specific identity ACL."""
+
         def _handler(client, timestamp: int, req_data: bytes):
             return self._handle_get_access_list(client, timestamp, req_data, identity_acl)
+
         return _handler
 
     def _handle_get_access_list(self, client, timestamp: int, req_data: bytes, identity_acl):
@@ -313,13 +310,13 @@ class ProtocolRequestHelper:
 
         # Sort (matches C++ order_by values)
         if order_by == 0:
-            entries.sort(key=lambda e: e[1])          # newest first (smallest heard_ago)
+            entries.sort(key=lambda e: e[1])  # newest first (smallest heard_ago)
         elif order_by == 1:
             entries.sort(key=lambda e: e[1], reverse=True)  # oldest first
         elif order_by == 2:
             entries.sort(key=lambda e: e[2], reverse=True)  # strongest SNR first
         elif order_by == 3:
-            entries.sort(key=lambda e: e[2])           # weakest SNR first
+            entries.sort(key=lambda e: e[2])  # weakest SNR first
 
         total_count = len(entries)
 
@@ -350,7 +347,11 @@ class ProtocolRequestHelper:
 
         logger.debug(
             "GET_NEIGHBOURS: total=%d, returned=%d, offset=%d, order=%d, requested=%d",
-            total_count, results_count, offset, order_by, count,
+            total_count,
+            results_count,
+            offset,
+            order_by,
+            count,
         )
         return header + bytes(results)
 
@@ -366,6 +367,7 @@ class ProtocolRequestHelper:
         # Version: use package version if available, fallback to "pyMC"
         try:
             from importlib.metadata import version as pkg_version
+
             fw_version = pkg_version("pymc-repeater")
         except Exception:
             fw_version = "pyMC"

@@ -457,9 +457,7 @@ class SQLiteHandler:
 
                 if not existing:
                     # Replace the non-unique index with a UNIQUE one
-                    conn.execute(
-                        "DROP INDEX IF EXISTS idx_companion_contacts_pubkey"
-                    )
+                    conn.execute("DROP INDEX IF EXISTS idx_companion_contacts_pubkey")
                     conn.execute(
                         "CREATE UNIQUE INDEX IF NOT EXISTS idx_companion_contacts_hash_pubkey "
                         "ON companion_contacts (companion_hash, pubkey)"
@@ -478,11 +476,18 @@ class SQLiteHandler:
                 ).fetchone()
 
                 if not existing:
-                    for table in ("companion_contacts", "companion_channels", "companion_messages"):
-                        conn.execute(
-                            f"UPDATE {table} SET companion_hash = '0x' || companion_hash "
-                            "WHERE companion_hash NOT LIKE '0x%'"
-                        )
+                    conn.execute(
+                        "UPDATE companion_contacts SET companion_hash = '0x' || companion_hash "
+                        "WHERE companion_hash NOT LIKE '0x%'"
+                    )
+                    conn.execute(
+                        "UPDATE companion_channels SET companion_hash = '0x' || companion_hash "
+                        "WHERE companion_hash NOT LIKE '0x%'"
+                    )
+                    conn.execute(
+                        "UPDATE companion_messages SET companion_hash = '0x' || companion_hash "
+                        "WHERE companion_hash NOT LIKE '0x%'"
+                    )
                     conn.execute(
                         "INSERT INTO migrations (migration_name, applied_at) VALUES (?, ?)",
                         (migration_name, time.time()),
@@ -811,13 +816,13 @@ class SQLiteHandler:
         """Store a CRC error batch (delta count since last poll)."""
         try:
             with self._connect() as conn:
-                conn.execute("""
+                conn.execute(
+                    """
                     INSERT INTO crc_errors (timestamp, count)
                     VALUES (?, ?)
-                """, (
-                    record.get("timestamp", time.time()),
-                    record.get("count", 1)
-                ))
+                """,
+                    (record.get("timestamp", time.time()), record.get("count", 1)),
+                )
         except Exception as e:
             logger.error(f"Failed to store CRC errors in SQLite: {e}")
 
@@ -827,8 +832,7 @@ class SQLiteHandler:
             cutoff = time.time() - (hours * 3600)
             with self._connect() as conn:
                 row = conn.execute(
-                    "SELECT COALESCE(SUM(count), 0) FROM crc_errors WHERE timestamp > ?",
-                    (cutoff,)
+                    "SELECT COALESCE(SUM(count), 0) FROM crc_errors WHERE timestamp > ?", (cutoff,)
                 ).fetchone()
                 return row[0] if row else 0
         except Exception as e:
@@ -1088,7 +1092,13 @@ class SQLiteHandler:
                 bucket_ts = int(row["timestamp"] / bucket_seconds) * bucket_seconds
                 ms = _airtime_ms(row["length"])
                 if bucket_ts not in buckets:
-                    buckets[bucket_ts] = {"timestamp": bucket_ts, "rx_ms": 0.0, "tx_ms": 0.0, "rx_count": 0, "tx_count": 0}
+                    buckets[bucket_ts] = {
+                        "timestamp": bucket_ts,
+                        "rx_ms": 0.0,
+                        "tx_ms": 0.0,
+                        "rx_count": 0,
+                        "tx_count": 0,
+                    }
                 if row["transmitted"]:
                     buckets[bucket_ts]["tx_ms"] += ms
                     buckets[bucket_ts]["tx_count"] += 1
@@ -1140,6 +1150,7 @@ class SQLiteHandler:
             # Align with pyMC_core feat/newRadios PAYLOAD_TYPES (0x0B = CONTROL)
             try:
                 from pymc_core.protocol.utils import PAYLOAD_TYPES as _PT
+
                 _human = {
                     "REQ": "Request",
                     "RESPONSE": "Response",
@@ -1388,13 +1399,21 @@ class SQLiteHandler:
         try:
             db_size = self.sqlite_path.stat().st_size if self.sqlite_path.exists() else 0
 
-            tables_with_timestamp = {
-                "packets": "timestamp",
-                "adverts": "timestamp",
-                "noise_floor": "timestamp",
-                "crc_errors": "timestamp",
-                "room_messages": "created_at",
-                "companion_messages": "created_at",
+            tables_with_timestamp = [
+                "packets",
+                "adverts",
+                "noise_floor",
+                "crc_errors",
+                "room_messages",
+                "companion_messages",
+            ]
+            stats_queries = {
+                "packets": "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM packets",
+                "adverts": "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM adverts",
+                "noise_floor": "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM noise_floor",
+                "crc_errors": "SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM crc_errors",
+                "room_messages": "SELECT COUNT(*), MIN(created_at), MAX(created_at) FROM room_messages",
+                "companion_messages": "SELECT COUNT(*), MIN(created_at), MAX(created_at) FROM companion_messages",
             }
             tables_without_timestamp = [
                 "transport_keys",
@@ -1405,6 +1424,15 @@ class SQLiteHandler:
                 "companion_prefs",
                 "migrations",
             ]
+            count_queries = {
+                "transport_keys": "SELECT COUNT(*) FROM transport_keys",
+                "api_tokens": "SELECT COUNT(*) FROM api_tokens",
+                "room_client_sync": "SELECT COUNT(*) FROM room_client_sync",
+                "companion_contacts": "SELECT COUNT(*) FROM companion_contacts",
+                "companion_channels": "SELECT COUNT(*) FROM companion_channels",
+                "companion_prefs": "SELECT COUNT(*) FROM companion_prefs",
+                "migrations": "SELECT COUNT(*) FROM migrations",
+            }
 
             table_info = []
             with self._connect() as conn:
@@ -1416,12 +1444,10 @@ class SQLiteHandler:
                     ).fetchall()
                 }
 
-                for table, ts_col in tables_with_timestamp.items():
+                for table in tables_with_timestamp:
                     if table not in existing:
                         continue
-                    row = conn.execute(
-                        f"SELECT COUNT(*), MIN({ts_col}), MAX({ts_col}) FROM {table}"  # noqa: S608
-                    ).fetchone()
+                    row = conn.execute(stats_queries[table]).fetchone()
                     count, oldest, newest = row[0], row[1], row[2]
                     table_info.append(
                         {
@@ -1436,7 +1462,7 @@ class SQLiteHandler:
                 for table in tables_without_timestamp:
                     if table not in existing:
                         continue
-                    count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]  # noqa: S608
+                    count = conn.execute(count_queries[table]).fetchone()[0]
                     table_info.append(
                         {
                             "name": table,
@@ -1469,9 +1495,22 @@ class SQLiteHandler:
         if table_name not in PURGEABLE:
             raise ValueError(f"Table '{table_name}' cannot be purged")
 
+        purge_queries = {
+            "packets": "DELETE FROM packets",
+            "adverts": "DELETE FROM adverts",
+            "noise_floor": "DELETE FROM noise_floor",
+            "crc_errors": "DELETE FROM crc_errors",
+            "room_messages": "DELETE FROM room_messages",
+            "room_client_sync": "DELETE FROM room_client_sync",
+            "companion_contacts": "DELETE FROM companion_contacts",
+            "companion_channels": "DELETE FROM companion_channels",
+            "companion_messages": "DELETE FROM companion_messages",
+            "companion_prefs": "DELETE FROM companion_prefs",
+        }
+
         try:
             with self._connect() as conn:
-                result = conn.execute(f"DELETE FROM {table_name}")  # noqa: S608
+                result = conn.execute(purge_queries[table_name])
                 conn.commit()
                 logger.info(f"Purged {result.rowcount} rows from {table_name}")
                 return result.rowcount
@@ -1508,7 +1547,12 @@ class SQLiteHandler:
 
                 conn.commit()
 
-                if packets_deleted > 0 or adverts_deleted > 0 or noise_deleted > 0 or crc_deleted > 0:
+                if (
+                    packets_deleted > 0
+                    or adverts_deleted > 0
+                    or noise_deleted > 0
+                    or crc_deleted > 0
+                ):
                     logger.info(
                         f"Cleaned up {packets_deleted} old packets, {adverts_deleted} old adverts, {noise_deleted} old noise measurements, {crc_deleted} old CRC error records"
                     )
@@ -1557,7 +1601,11 @@ class SQLiteHandler:
             return {"rx_total": 0, "tx_total": 0, "drop_total": 0, "type_counts": {}}
 
     def get_adverts_by_contact_type(
-        self, contact_type: str, limit: Optional[int] = None, offset: Optional[int] = None, hours: Optional[int] = None
+        self,
+        contact_type: str,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        hours: Optional[int] = None,
     ) -> List[dict]:
 
         try:
@@ -1779,38 +1827,51 @@ class SQLiteHandler:
         last_used: Optional[float] = None,
     ) -> bool:
         try:
-            updates = []
-            params = []
+            has_name = name is not None
+            has_flood_policy = flood_policy is not None
+            has_transport_key = transport_key is not None
+            has_parent_id = parent_id is not None
+            has_last_used = last_used is not None
 
-            if name is not None:
-                updates.append("name = ?")
-                params.append(name)
-            if flood_policy is not None:
-                updates.append("flood_policy = ?")
-                params.append(flood_policy)
-            if transport_key is not None:
-                updates.append("transport_key = ?")
-                params.append(transport_key)
-            if parent_id is not None:
-                updates.append("parent_id = ?")
-                params.append(parent_id)
-            if last_used is not None:
-                updates.append("last_used = ?")
-                params.append(last_used)
-
-            if not updates:
+            if not any(
+                [
+                    has_name,
+                    has_flood_policy,
+                    has_transport_key,
+                    has_parent_id,
+                    has_last_used,
+                ]
+            ):
                 return False
 
-            updates.append("updated_at = ?")
-            params.append(time.time())
-            params.append(key_id)
+            params = (
+                int(has_name),
+                name,
+                int(has_flood_policy),
+                flood_policy,
+                int(has_transport_key),
+                transport_key,
+                int(has_parent_id),
+                parent_id,
+                int(has_last_used),
+                last_used,
+                time.time(),
+                key_id,
+            )
 
             with self._connect() as conn:
                 cursor = conn.execute(
-                    f"""
-                    UPDATE transport_keys SET {', '.join(updates)}
+                    """
+                    UPDATE transport_keys
+                    SET
+                        name = CASE WHEN ? THEN ? ELSE name END,
+                        flood_policy = CASE WHEN ? THEN ? ELSE flood_policy END,
+                        transport_key = CASE WHEN ? THEN ? ELSE transport_key END,
+                        parent_id = CASE WHEN ? THEN ? ELSE parent_id END,
+                        last_used = CASE WHEN ? THEN ? ELSE last_used END,
+                        updated_at = ?
                     WHERE id = ?
-                """,
+                    """,
                     params,
                 )
                 return cursor.rowcount > 0
@@ -1911,9 +1972,7 @@ class SQLiteHandler:
                     transport_key = self.generate_transport_key(node["name"])
                     generated_keys += 1
                 parent_id = (
-                    db_ids.get(node["parent_node_id"])
-                    if node.get("parent_node_id")
-                    else None
+                    db_ids.get(node["parent_node_id"]) if node.get("parent_node_id") else None
                 )
                 cursor = conn.execute(
                     """
@@ -2035,8 +2094,8 @@ class SQLiteHandler:
                 # Use INSERT OR REPLACE for single atomic upsert
                 conn.execute(
                     f"""
-                    INSERT OR REPLACE INTO room_client_sync ({', '.join(columns)})
-                    VALUES ({', '.join(placeholders)})
+                    INSERT OR REPLACE INTO room_client_sync ({", ".join(columns)})
+                    VALUES ({", ".join(placeholders)})
                 """,
                     values,
                 )

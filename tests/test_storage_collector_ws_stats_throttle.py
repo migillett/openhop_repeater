@@ -3,6 +3,8 @@ import types
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from repeater.data_acquisition.storage_collector import StorageCollector
+
 sys.modules.setdefault("psutil", types.ModuleType("psutil"))
 
 nacl_module = types.ModuleType("nacl")
@@ -18,8 +20,6 @@ nacl_module.signing = nacl_signing_module
 
 sys.modules.setdefault("nacl", nacl_module)
 sys.modules.setdefault("nacl.signing", nacl_signing_module)
-
-from repeater.data_acquisition.storage_collector import StorageCollector
 
 
 def _make_collector() -> StorageCollector:

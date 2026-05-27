@@ -5,7 +5,9 @@ import time
 from pathlib import Path
 import pytest
 
-_MODULE_PATH = Path(__file__).resolve().parents[1] / "repeater" / "data_acquisition" / "glass_handler.py"
+_MODULE_PATH = (
+    Path(__file__).resolve().parents[1] / "repeater" / "data_acquisition" / "glass_handler.py"
+)
 _SPEC = importlib.util.spec_from_file_location("repeater_glass_handler", _MODULE_PATH)
 _MODULE = importlib.util.module_from_spec(_SPEC)
 assert _SPEC and _SPEC.loader

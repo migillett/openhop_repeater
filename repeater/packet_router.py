@@ -44,7 +44,6 @@ def _is_direct_final_hop(packet) -> bool:
 
 
 class PacketRouter:
-
     def __init__(self, daemon_instance):
         self.daemon = daemon_instance
         self.queue = asyncio.Queue(maxsize=500)
@@ -75,7 +74,7 @@ class PacketRouter:
         self.running = True
         self.router_task = asyncio.create_task(self._process_queue())
         logger.info("Packet router started")
-    
+
     async def stop(self):
         self.running = False
         if self.router_task:
@@ -121,7 +120,7 @@ class PacketRouter:
             exc = task.exception()
             if exc is not None:
                 logger.error("_route_packet raised: %s", exc, exc_info=exc)
-    
+
     def _should_deliver_path_to_companions(self, packet) -> bool:
         """Return True if this PATH/protocol-response should be delivered to companions (first of duplicates)."""
         key = _companion_dedup_key(packet)
@@ -173,9 +172,7 @@ class PacketRouter:
             # (avoids duty-cycle or dispatcher races where a later packet goes out first)
             async with self._inject_lock:
                 # Use local_transmission=True to bypass forwarding logic
-                await self.daemon.repeater_handler(
-                    packet, metadata, local_transmission=True
-                )
+                await self.daemon.repeater_handler(packet, metadata, local_transmission=True)
 
             # Mark so when this packet is dequeued we don't pass to engine again (avoid double-send / double-count)
             packet._injected_for_tx = True
@@ -189,7 +186,11 @@ class PacketRouter:
             )
             # Log protocol REQ (e.g. status/telemetry) so we can confirm target node
             ptype = getattr(packet, "get_payload_type", lambda: None)()
-            if ptype == ProtocolRequestHandler.payload_type() and packet.payload and packet_len >= 1:
+            if (
+                ptype == ProtocolRequestHandler.payload_type()
+                and packet.payload
+                and packet_len >= 1
+            ):
                 logger.info(
                     "Injected protocol REQ: dest=0x%02x, payload=%d bytes",
                     packet.payload[0],
@@ -200,7 +201,7 @@ class PacketRouter:
         except Exception as e:
             logger.error(f"Error injecting packet through engine: {e}")
             return False
-    
+
     async def _process_queue(self):
         while self.running:
             try:
@@ -213,7 +214,9 @@ class PacketRouter:
                     logger.warning(
                         "In-flight task cap reached (%d/%d), dropping packet "
                         "(session total dropped: %d)",
-                        self._in_flight, self._max_in_flight, self._cap_drop_count,
+                        self._in_flight,
+                        self._max_in_flight,
+                        self._cap_drop_count,
                     )
                     continue
                 self._in_flight += 1

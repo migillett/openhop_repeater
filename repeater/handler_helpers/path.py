@@ -62,7 +62,7 @@ class PathHelper:
             # Parse decrypted PATH data
             # Format: path_len(1) + path[path_len] + extra_type(1) + extra[...]
             if len(decrypted) < 1:
-                logger.debug(f"Decrypted PATH data too short")
+                logger.debug("Decrypted PATH data too short")
                 return False
 
             path_len = decrypted[0]

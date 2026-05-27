@@ -12,7 +12,9 @@ from repeater.handler_helpers.trace import TraceHelper
 
 
 class DummyPacket:
-    def __init__(self, *, route=ROUTE_TYPE_DIRECT, path=b"", payload=b"\x01\x02", snr=2.5, rssi=-70):
+    def __init__(
+        self, *, route=ROUTE_TYPE_DIRECT, path=b"", payload=b"\x01\x02", snr=2.5, rssi=-70
+    ):
         self.header = route
         self.path = bytearray(path)
         self.path_len = len(self.path)
@@ -86,7 +88,7 @@ async def test_trace_helper_process_sets_pending_ping_and_forwards():
     tag = 77
     evt = helper.register_ping(tag, 0x42)
 
-    packet = DummyPacket(path=b"\x01", payload=b"\xAA\xBB\xCC")
+    packet = DummyPacket(path=b"\x01", payload=b"\xaa\xbb\xcc")
     helper._forward_trace_packet = AsyncMock()
     helper._extract_path_info = MagicMock(return_value=([], []))
     helper._should_forward_trace = MagicMock(return_value=True)
@@ -112,7 +114,9 @@ async def test_trace_helper_process_sets_pending_ping_and_forwards():
 
 @pytest.mark.asyncio
 async def test_trace_helper_ignores_zero_rssi_pending_ping_response():
-    helper = TraceHelper(local_hash=0x42, local_identity=FakeIdentity(0x42), repeater_handler=MagicMock())
+    helper = TraceHelper(
+        local_hash=0x42, local_identity=FakeIdentity(0x42), repeater_handler=MagicMock()
+    )
     tag = 9
     evt = helper.register_ping(tag, 0x42)
 
@@ -158,7 +162,9 @@ async def test_trace_helper_forward_trace_packet_updates_recent_record_and_injec
 
 
 def test_trace_helper_cleanup_stale_pings():
-    helper = TraceHelper(local_hash=0x42, local_identity=FakeIdentity(0x42), repeater_handler=MagicMock())
+    helper = TraceHelper(
+        local_hash=0x42, local_identity=FakeIdentity(0x42), repeater_handler=MagicMock()
+    )
     helper.pending_pings = {
         1: {"sent_at": time.time() - 100, "event": asyncio.Event(), "result": None, "target": 1},
         2: {"sent_at": time.time(), "event": asyncio.Event(), "result": None, "target": 2},
@@ -171,13 +177,19 @@ def test_trace_helper_cleanup_stale_pings():
 
 
 def test_discovery_request_filter_match_and_mismatch():
-    helper = DiscoveryHelper(local_identity=FakeIdentity(0x42), packet_injector=AsyncMock(), node_type=2)
+    helper = DiscoveryHelper(
+        local_identity=FakeIdentity(0x42), packet_injector=AsyncMock(), node_type=2
+    )
     helper._send_discovery_response = MagicMock()
 
-    helper._on_discovery_request({"tag": 1, "filter": 0x00, "prefix_only": False, "snr": 1.2, "rssi": -80})
+    helper._on_discovery_request(
+        {"tag": 1, "filter": 0x00, "prefix_only": False, "snr": 1.2, "rssi": -80}
+    )
     helper._send_discovery_response.assert_not_called()
 
-    helper._on_discovery_request({"tag": 2, "filter": 0x04, "prefix_only": True, "snr": 2.3, "rssi": -70})
+    helper._on_discovery_request(
+        {"tag": 2, "filter": 0x04, "prefix_only": True, "snr": 2.3, "rssi": -70}
+    )
     helper._send_discovery_response.assert_called_once_with(2, 2, 2.3, True)
 
 
@@ -185,7 +197,9 @@ def test_discovery_request_without_identity_does_not_send():
     helper = DiscoveryHelper(local_identity=None, packet_injector=AsyncMock(), node_type=2)
     helper._send_discovery_response = MagicMock()
 
-    helper._on_discovery_request({"tag": 7, "filter": 0x04, "prefix_only": False, "snr": 0.0, "rssi": -90})
+    helper._on_discovery_request(
+        {"tag": 7, "filter": 0x04, "prefix_only": False, "snr": 0.0, "rssi": -90}
+    )
 
     helper._send_discovery_response.assert_not_called()
 
@@ -205,7 +219,10 @@ async def test_discovery_send_packet_async_success_failure_and_exception():
 def test_discovery_send_response_without_injector_is_safe():
     helper = DiscoveryHelper(local_identity=FakeIdentity(0x42), packet_injector=None)
 
-    with patch("pymc_core.protocol.packet_builder.PacketBuilder.create_discovery_response", return_value=object()):
+    with patch(
+        "pymc_core.protocol.packet_builder.PacketBuilder.create_discovery_response",
+        return_value=object(),
+    ):
         helper._send_discovery_response(tag=5, node_type=2, inbound_snr=1.0, prefix_only=False)
 
 
@@ -237,13 +254,19 @@ def test_login_register_identity_repeater_creates_acl_and_handler():
 
     with (
         patch("repeater.handler_helpers.acl.ACL", return_value=acl_obj) as acl_cls,
-        patch("repeater.handler_helpers.login.LoginServerHandler", return_value=handler_obj) as handler_cls,
+        patch(
+            "repeater.handler_helpers.login.LoginServerHandler", return_value=handler_obj
+        ) as handler_cls,
     ):
         helper.register_identity(
             name="repeater-main",
             identity=identity,
             identity_type="repeater",
-            config={"repeater": {"security": {"max_clients": 3, "admin_password": "a", "guest_password": "g"}}},
+            config={
+                "repeater": {
+                    "security": {"max_clients": 3, "admin_password": "a", "guest_password": "g"}
+                }
+            },
         )
 
     acl_cls.assert_called_once()

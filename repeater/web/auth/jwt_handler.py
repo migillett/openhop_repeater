@@ -11,7 +11,7 @@ class JWTHandler:
     def __init__(self, secret: str, expiry_minutes: int = 15):
         self.secret = secret
         self.expiry_minutes = expiry_minutes
-    
+
     def create_jwt(self, username: str, client_id: str) -> str:
 
         now = int(time.time())

@@ -23,7 +23,9 @@ class SensorRegistry:
         return _decorator
 
     @classmethod
-    def create(cls, sensor_type: str, name: str, config: Optional[Dict[str, Any]] = None, **kwargs) -> SensorBase:
+    def create(
+        cls, sensor_type: str, name: str, config: Optional[Dict[str, Any]] = None, **kwargs
+    ) -> SensorBase:
         key = str(sensor_type).strip().lower()
         factory = cls._factories.get(key)
         if factory is None:

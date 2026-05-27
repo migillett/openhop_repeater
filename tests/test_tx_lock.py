@@ -24,6 +24,7 @@ from unittest.mock import AsyncMock, MagicMock
 # Minimal handler factory
 # ---------------------------------------------------------------------------
 
+
 def _make_handler():
     """
     Return a RepeaterHandler instance with all external I/O mocked.
@@ -49,11 +50,9 @@ def _make_handler():
 
     h = RepeaterHandler.__new__(RepeaterHandler)
     h.config = {
-        "repeater": {"mode": "forward", "cache_ttl": 3600,
-                     "send_advert_interval_hours": 0},
+        "repeater": {"mode": "forward", "cache_ttl": 3600, "send_advert_interval_hours": 0},
         "delays": {"tx_delay_factor": 1.0, "direct_tx_delay_factor": 0.5},
-        "duty_cycle": {"enforcement_enabled": True,
-                       "max_airtime_per_minute": 3600},
+        "duty_cycle": {"enforcement_enabled": True, "max_airtime_per_minute": 3600},
         "storage": {},
         "mesh": {},
     }
@@ -80,8 +79,8 @@ def _make_packet(size: int = 50) -> MagicMock:
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestTxLockSerialisation(unittest.IsolatedAsyncioTestCase):
 
+class TestTxLockSerialisation(unittest.IsolatedAsyncioTestCase):
     # ── Test 1: no interleaving ─────────────────────────────────────────────
 
     async def test_concurrent_sends_do_not_interleave(self):
@@ -100,7 +99,7 @@ class TestTxLockSerialisation(unittest.IsolatedAsyncioTestCase):
             if in_flight[0]:
                 overlap_detected[0] = True
             in_flight[0] = True
-            await asyncio.sleep(0.05)   # simulate ~50ms radio TX
+            await asyncio.sleep(0.05)  # simulate ~50ms radio TX
             in_flight[0] = False
 
         h.dispatcher.send_packet.side_effect = send_with_overlap_check
@@ -115,8 +114,9 @@ class TestTxLockSerialisation(unittest.IsolatedAsyncioTestCase):
             "send_packet was entered while another call was already in-flight "
             "— _tx_lock is not serialising correctly",
         )
-        self.assertEqual(h.dispatcher.send_packet.call_count, 2,
-                         "Expected exactly 2 send_packet calls")
+        self.assertEqual(
+            h.dispatcher.send_packet.call_count, 2, "Expected exactly 2 send_packet calls"
+        )
 
     # ── Test 2: TOCTOU duty-cycle fix ──────────────────────────────────────
 
@@ -150,7 +150,8 @@ class TestTxLockSerialisation(unittest.IsolatedAsyncioTestCase):
         await asyncio.gather(t1, t2, return_exceptions=True)
 
         self.assertEqual(
-            h.dispatcher.send_packet.call_count, 1,
+            h.dispatcher.send_packet.call_count,
+            1,
             "Both packets were sent — duty-cycle TOCTOU race was NOT fixed",
         )
 
@@ -193,10 +194,8 @@ class TestTxLockSerialisation(unittest.IsolatedAsyncioTestCase):
         )
         await asyncio.gather(t_local, t_other, return_exceptions=True)
 
-        self.assertIn(id(pkt_other), send_times,
-                      "pkt_other was never sent")
-        self.assertIn(id(pkt_local), send_times,
-                      "pkt_local retry was never sent")
+        self.assertIn(id(pkt_other), send_times, "pkt_other was never sent")
+        self.assertIn(id(pkt_local), send_times, "pkt_local retry was never sent")
 
         # pkt_other fires at ~0.1s; pkt_local retry fires at ~1.0s.
         # If the lock were held during backoff, pkt_other would block until ~1.0s
@@ -218,8 +217,7 @@ class TestTxLockSerialisation(unittest.IsolatedAsyncioTestCase):
 
         h.dispatcher.send_packet.side_effect = RuntimeError("radio error")
 
-        task = await h.schedule_retransmit(pkt, delay=0.0, airtime_ms=0,
-                                           local_transmission=False)
+        task = await h.schedule_retransmit(pkt, delay=0.0, airtime_ms=0, local_transmission=False)
         with self.assertRaises(RuntimeError):
             await task
 
@@ -259,8 +257,9 @@ class TestTxLockSerialisation(unittest.IsolatedAsyncioTestCase):
         )
         await task  # should complete without error (gate returns silently)
 
-        self.assertEqual(send_calls[0], 1,
-                         "send_packet called on retry despite duty-cycle rejection")
+        self.assertEqual(
+            send_calls[0], 1, "send_packet called on retry despite duty-cycle rejection"
+        )
 
 
 if __name__ == "__main__":

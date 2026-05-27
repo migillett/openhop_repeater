@@ -25,7 +25,6 @@ def set_daemon(instance):
 
 
 class CompanionFrameWebSocket(WebSocket):
-
     def opened(self):
         """Authenticate, resolve companion, open TCP socket, start reader."""
         # JWT auth — same pattern as PacketWebSocket
@@ -95,7 +94,9 @@ class CompanionFrameWebSocket(WebSocket):
         self._reader.start()
 
         user = payload.get("sub", "unknown")
-        logger.info(f"Companion WS opened: user={user}, companion={companion_name}, tcp={tcp_host}:{tcp_port}")
+        logger.info(
+            f"Companion WS opened: user={user}, companion={companion_name}, tcp={tcp_host}:{tcp_port}"
+        )
 
     def received_message(self, message):
         """WS → TCP"""
@@ -220,11 +221,11 @@ class CompanionFrameWebSocket(WebSocket):
         if tcp:
             try:
                 tcp.close()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"WS proxy TCP close failed for {name!r}: {exc}")
             self._tcp = None
 
         try:
             self.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"WS proxy close failed for {name!r}: {exc}")

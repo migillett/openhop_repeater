@@ -17,7 +17,7 @@ class _FakeIdentity:
 
 
 class _FakePacket:
-    def __init__(self, *, header=0x00, path=None, pkt_hash=b"\xAA" * 16):
+    def __init__(self, *, header=0x00, path=None, pkt_hash=b"\xaa" * 16):
         self.header = header
         self.path = path if path is not None else bytearray()
         self._pkt_hash = pkt_hash
@@ -286,7 +286,9 @@ def test_advert_reload_config_and_cleanup_old_state_bounds_memory():
     now = time.time()
     helper._recent_advert_hashes["old"] = now - 1
     helper._penalty_until["pk"] = now - 1
-    helper._bucket_state["oldpk"] = {"last_seen": now - (helper._bucket_state_retention_seconds + 1)}
+    helper._bucket_state["oldpk"] = {
+        "last_seen": now - (helper._bucket_state_retention_seconds + 1)
+    }
     helper._violation_state["oldpk"] = {"count": 3, "last_violation": now - 9999}
 
     helper._cleanup_old_state(now)

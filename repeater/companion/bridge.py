@@ -80,9 +80,7 @@ class RepeaterCompanionBridge(CompanionBridge):
         try:
             prefs_dict = dataclasses.asdict(self.prefs)
             prefs_safe = _to_json_safe(prefs_dict)
-            self._sqlite_handler.companion_save_prefs(
-                str(self._companion_hash), prefs_safe
-            )
+            self._sqlite_handler.companion_save_prefs(str(self._companion_hash), prefs_safe)
             if self._on_prefs_saved:
                 try:
                     self._on_prefs_saved(self.prefs.node_name)

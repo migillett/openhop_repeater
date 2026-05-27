@@ -16,7 +16,7 @@ class _FakeLocalIdentity:
         return bytes([self._seed[0]]) + (b"P" * 31)
 
     def get_address_bytes(self):
-        return b"\xAB\xCD"
+        return b"\xab\xcd"
 
 
 def _base_config():
@@ -60,7 +60,9 @@ async def test_run_starts_http_and_handles_dispatcher_cancelled_gracefully():
 
     async def _init_stub():
         daemon.local_identity = SimpleNamespace(get_public_key=lambda: b"\x22" * 32)
-        daemon.dispatcher = SimpleNamespace(run_forever=AsyncMock(side_effect=asyncio.CancelledError()))
+        daemon.dispatcher = SimpleNamespace(
+            run_forever=AsyncMock(side_effect=asyncio.CancelledError())
+        )
 
     daemon.initialize = _init_stub
 

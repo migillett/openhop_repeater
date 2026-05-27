@@ -1,10 +1,7 @@
 import asyncio
-import json
 import logging
 import time
-from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from repeater.config import resolve_storage_dir
 
@@ -31,7 +28,9 @@ class StorageCollector:
 
         # Initialize MQTT handler if configured
         self.mqtt_handler = None
-        if (config.get("mqtt_brokers", {}) or config.get("letsmesh", {}) or config.get("mqtt", {})) and local_identity:
+        if (
+            config.get("mqtt_brokers", {}) or config.get("letsmesh", {}) or config.get("mqtt", {})
+        ) and local_identity:
             try:
                 # Pass local_identity directly (supports both standard and firmware keys)
                 self.mqtt_handler = MeshCoreToMqttPusher(
@@ -42,9 +41,7 @@ class StorageCollector:
                 self.mqtt_handler.connect()
 
                 public_key_hex = local_identity.get_public_key().hex()
-                logger.info(
-                    f"MQTT handler initialized with public key: {public_key_hex[:16]}..."
-                )
+                logger.info(f"MQTT handler initialized with public key: {public_key_hex[:16]}...")
             except Exception as e:
                 logger.error(f"Failed to initialize MQTT handler: {e}")
                 self.mqtt_handler = None
@@ -196,7 +193,9 @@ class StorageCollector:
                         self._last_ws_stats_broadcast = now_mono
                         packet_stats_24h = self.sqlite_handler.get_packet_stats(hours=24)
                         uptime_seconds = (
-                            time.time() - self.repeater_handler.start_time if self.repeater_handler else 0
+                            time.time() - self.repeater_handler.start_time
+                            if self.repeater_handler
+                            else 0
                         )
                         self.websocket_broadcast_stats(
                             {
@@ -206,7 +205,6 @@ class StorageCollector:
                         )
             except Exception as e:
                 logger.debug(f"WebSocket broadcast failed: {e}")
-
 
         self._publish_packet_to_mqtt(packet_record)
 

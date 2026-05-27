@@ -25,8 +25,8 @@ from .base import SensorBase
 from .registry import SensorRegistry
 
 # SHTC3 two-byte command words
-_CMD_WAKE  = [0x35, 0x17]
-_CMD_MEAS  = [0x7C, 0xA2]  # T-first, normal power mode
+_CMD_WAKE = [0x35, 0x17]
+_CMD_MEAS = [0x7C, 0xA2]  # T-first, normal power mode
 _CMD_SLEEP = [0xB0, 0x98]
 
 
@@ -47,6 +47,7 @@ class SHTC3Sensor(SensorBase):
 
         try:
             import smbus2  # type: ignore[import-not-found]
+
             self._smbus2 = smbus2
 
             # Verify sensor is reachable: wake then immediately sleep
@@ -93,16 +94,16 @@ class SHTC3Sensor(SensorBase):
             bus.i2c_rdwr(smbus2.i2c_msg.write(self.i2c_address, _CMD_SLEEP))
 
             # Bytes: T_MSB, T_LSB, T_CRC, RH_MSB, RH_LSB, RH_CRC
-            t_raw  = (data[0] << 8) | data[1]
+            t_raw = (data[0] << 8) | data[1]
             rh_raw = (data[3] << 8) | data[4]
             temp_c = round(-45.0 + 175.0 * t_raw / 65536.0, 2)
             temp_f = round(temp_c * 9.0 / 5.0 + 32.0, 2)
-            rh     = round(100.0 * rh_raw / 65536.0, 2)
+            rh = round(100.0 * rh_raw / 65536.0, 2)
 
             return {
                 "temperature_c": temp_c,
                 "temperature_f": temp_f,
-                "humidity_pct":  rh,
+                "humidity_pct": rh,
             }
         except Exception as exc:
             raise RuntimeError(f"SHTC3 read failed: {exc}") from exc

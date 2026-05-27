@@ -8,7 +8,6 @@ Also handles CLI commands for admin users on the repeater identity.
 
 import asyncio
 import logging
-import struct
 import time
 
 from pymc_core.node.handlers.text import TextMessageHandler
@@ -24,7 +23,6 @@ TXT_TYPE_CLI_DATA = 0x01
 
 
 class TextHelper:
-
     def __init__(
         self,
         identity_manager,
@@ -175,21 +173,19 @@ class TextHelper:
                 except RuntimeError:
                     # No running event loop in this thread
                     if self._loop and self._loop.is_running():
-                        future = asyncio.run_coroutine_threadsafe(
-                            room_server.start(), self._loop
-                        )
+                        future = asyncio.run_coroutine_threadsafe(room_server.start(), self._loop)
                         future.add_done_callback(
-                            lambda f: logger.error(
-                                f"Room server '{name}' failed: {f.exception()}",
-                                exc_info=f.exception(),
+                            lambda f: (
+                                logger.error(
+                                    f"Room server '{name}' failed: {f.exception()}",
+                                    exc_info=f.exception(),
+                                )
+                                if not f.cancelled() and f.exception()
+                                else None
                             )
-                            if not f.cancelled() and f.exception()
-                            else None
                         )
                     else:
-                        logger.error(
-                            f"Cannot start room server '{name}': no event loop available"
-                        )
+                        logger.error(f"Cannot start room server '{name}': no event loop available")
 
                 logger.info(
                     f"Registered room server '{name}': hash=0x{hash_byte:02X}, "
@@ -271,7 +267,7 @@ class TextHelper:
 
         # Placeholder - can be overridden or callback can be added
         logger.debug(
-            f"Message received for {identity_type} '{identity_name}' " f"from 0x{src_hash:02X}"
+            f"Message received for {identity_type} '{identity_name}' from 0x{src_hash:02X}"
         )
 
         # Extract decrypted message if available
@@ -511,7 +507,7 @@ class TextHelper:
         """
         import time
 
-        from pymc_core.protocol import Identity, PacketBuilder
+        from pymc_core.protocol import PacketBuilder
         from pymc_core.protocol.constants import PAYLOAD_TYPE_TXT_MSG
 
         try:

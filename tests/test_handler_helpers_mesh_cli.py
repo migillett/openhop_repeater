@@ -77,7 +77,9 @@ def test_cmd_advert_branches_and_success_schedule():
     fake_loop = SimpleNamespace(is_running=lambda: True)
     cli._event_loop = fake_loop
 
-    with patch("asyncio.run_coroutine_threadsafe", side_effect=lambda coro, _loop: coro.close()) as run_ts:
+    with patch(
+        "asyncio.run_coroutine_threadsafe", side_effect=lambda coro, _loop: coro.close()
+    ) as run_ts:
         out = cli._cmd_advert()
 
     assert out == "OK - Advert sent"
@@ -124,7 +126,9 @@ def test_cmd_get_public_key_and_neighbor_branches():
     cli.storage_handler = storage
     assert cli._cmd_neighbors() == "No neighbors discovered yet"
 
-    storage.get_neighbors = lambda: {"aa": {"is_repeater": False, "zero_hop": False, "last_seen": 1}}
+    storage.get_neighbors = lambda: {
+        "aa": {"is_repeater": False, "zero_hop": False, "last_seen": 1}
+    }
     assert "No repeaters or zero hop" in cli._cmd_neighbors()
 
     storage.get_neighbors = lambda: {
@@ -137,7 +141,9 @@ def test_cmd_get_public_key_and_neighbor_branches():
     assert "abcdef12:20:4" in out
     assert "11223344:10:1" in out
 
-    cli.storage_handler = SimpleNamespace(get_neighbors=MagicMock(side_effect=RuntimeError("db fail")))
+    cli.storage_handler = SimpleNamespace(
+        get_neighbors=MagicMock(side_effect=RuntimeError("db fail"))
+    )
     assert cli._cmd_neighbors().startswith("Error:")
 
 
@@ -179,7 +185,7 @@ def test_cmd_set_updates_and_validation_errors():
 def test_misc_commands_and_routes():
     cli = MeshCLI("/tmp/cfg.yaml", _base_config(), _cfg_mgr(), enable_regions=True)
 
-    assert cli._cmd_region("region") .startswith("Error:")
+    assert cli._cmd_region("region").startswith("Error:")
     assert cli._cmd_region("region load us").startswith("Error:")
     assert cli._cmd_region("region save").startswith("Error:")
     assert cli._cmd_region("region remove x").startswith("Error:")

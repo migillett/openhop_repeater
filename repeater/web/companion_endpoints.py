@@ -617,9 +617,11 @@ class CompanionAPIEndpoints:
         companion_name = body.get("companion_name")
         if companion_name is None and getattr(self.daemon_instance, "identity_manager", None):
             pubkey = bridge.get_public_key()
-            for reg_name, identity, _ in self.daemon_instance.identity_manager.get_identities_by_type(
-                "companion"
-            ):
+            for (
+                reg_name,
+                identity,
+                _,
+            ) in self.daemon_instance.identity_manager.get_identities_by_type("companion"):
                 if identity.get_public_key() == pubkey:
                     companion_name = reg_name
                     break

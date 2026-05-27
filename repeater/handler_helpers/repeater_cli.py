@@ -5,11 +5,9 @@ Only users with admin permissions (via ACL) can execute these commands.
 """
 
 import logging
-import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict
 
-import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +20,8 @@ class MeshCLI:
     """
 
     def __init__(
-        self, 
-        config_path: str, 
+        self,
+        config_path: str,
         config: Dict[str, Any],
         save_config_callback: Callable,
         identity_type: str = "repeater",
@@ -31,7 +29,7 @@ class MeshCLI:
     ):
         """
         Initialize the CLI handler.
-        
+
         Args:
             config_path: Path to the config.yaml file
             config: Current configuration dictionary
@@ -51,19 +49,19 @@ class MeshCLI:
     def handle_command(self, sender_pubkey: bytes, command: str, is_admin: bool) -> str:
         """
         Handle an incoming command from a client.
-        
+
         Args:
             sender_pubkey: Public key of sender
             command: Command string (may include XX| prefix)
             is_admin: Whether sender has admin permissions
-            
+
         Returns:
             Reply string to send back to sender
         """
         # Check admin permission first
         if not is_admin:
             return "Error: Admin permission required"
-        
+
         logger.debug(f"handle_command received: '{command}' (len={len(command)})")
 
         # Extract optional sequence prefix (XX|)
@@ -72,26 +70,26 @@ class MeshCLI:
             prefix = command[:3]
             command = command[3:]
             logger.debug(f"Extracted prefix: '{prefix}', remaining command: '{command}'")
-        
+
         # Strip leading/trailing whitespace
         command = command.strip()
         logger.debug(f"After strip: '{command}'")
-        
+
         # Route to appropriate handler
         reply = self._route_command(command)
-        
+
         # Add prefix back to reply if present
         if prefix:
             return prefix + reply
         return reply
-    
+
     def _route_command(self, command: str) -> str:
         """Route command to appropriate handler method."""
-        
+
         # Help
         if command == "help" or command.startswith("help "):
             return self._cmd_help(command)
-        
+
         # System commands
         elif command == "reboot":
             return self._cmd_reboot()
@@ -109,57 +107,57 @@ class MeshCLI:
             return self._cmd_clear_stats()
         elif command == "ver":
             return self._cmd_version()
-        
+
         # Get commands
         elif command.startswith("get "):
             return self._cmd_get(command[4:])
-        
+
         # Set commands
         elif command.startswith("set "):
             return self._cmd_set(command[4:])
-        
+
         # ACL commands
         elif command.startswith("setperm "):
             return self._cmd_setperm(command)
         elif command == "get acl":
             return "Error: Use 'get acl' via serial console only"
-        
+
         # Region commands (repeaters only)
         elif command.startswith("region"):
             if self.enable_regions:
                 return self._cmd_region(command)
             else:
                 return "Error: Region commands not available for room servers"
-        
+
         # Neighbor commands
         elif command == "neighbors":
             return self._cmd_neighbors()
         elif command.startswith("neighbor.remove "):
             return self._cmd_neighbor_remove(command)
-        
+
         # Temporary radio params
         elif command.startswith("tempradio "):
             return self._cmd_tempradio(command)
-        
+
         # Sensor commands
         elif command.startswith("sensor "):
             return "Error: Sensor commands not implemented in Python repeater"
-        
+
         # GPS commands
         elif command.startswith("gps"):
             return "Error: GPS commands not implemented in Python repeater"
-        
+
         # Logging commands
         elif command.startswith("log "):
             return self._cmd_log(command)
-        
+
         # Statistics commands
         elif command.startswith("stats-"):
             return "Error: Stats commands not fully implemented yet"
-        
+
         else:
             return "Unknown command"
-    
+
     # ==================== Help Command ====================
 
     def _cmd_help(self, command: str) -> str:
@@ -167,7 +165,7 @@ class MeshCLI:
         parts = command.split(None, 1)
         if len(parts) == 2:
             return self._help_detail(parts[1])
-        
+
         lines = [
             "=== pyMC CLI Commands ===",
             "",
@@ -260,25 +258,25 @@ class MeshCLI:
         return details.get(topic, f"No detailed help for '{topic}'. Type 'help' for command list.")
 
     # ==================== System Commands ==
-    
+
     def _cmd_reboot(self) -> str:
         """Reboot the repeater process."""
         from repeater.service_utils import restart_service
-        
+
         logger.warning("Reboot command received via repeater CLI")
         success, message = restart_service()
-        
+
         if success:
             return f"OK - {message}"
         else:
             return f"Error: {message}"
-    
+
     def _cmd_advert(self) -> str:
         """Send self advertisement."""
         logger.info("Advert command received")
         # TODO: Trigger advertisement through packet handler
         return "Error: Not yet implemented"
-    
+
     def _cmd_clock(self, command: str) -> str:
         """Handle clock commands."""
         if command == "clock":
@@ -292,15 +290,15 @@ class MeshCLI:
             return "OK - clock sync not needed (system time used)"
         else:
             return "Unknown clock command"
-    
+
     def _cmd_time(self, command: str) -> str:
         """Set time - not supported in Python (use system time)."""
         return "Error: Time setting not supported (system time is used)"
-    
+
     def _cmd_password(self, command: str) -> str:
         """Change admin password."""
         new_password = command[9:].strip()
-        
+
         if not new_password:
             return "Error: Password cannot be empty"
 
@@ -317,12 +315,12 @@ class MeshCLI:
         except Exception as e:
             logger.error(f"Failed to save password: {e}")
             return "Error: Failed to save password"
-    
+
     def _cmd_clear_stats(self) -> str:
         """Clear statistics."""
         # TODO: Implement stats clearing
         return "Error: Not yet implemented"
-    
+
     def _cmd_version(self) -> str:
         """Get version information."""
         role = "room_server" if self.identity_type == "room_server" else "repeater"
@@ -330,7 +328,7 @@ class MeshCLI:
         return f"pyMC_{role} v{version}"
 
     # ==================== Get Commands ====================
-    
+
     def _cmd_get(self, param: str) -> str:
         """Handle get commands."""
         param = param.strip()
@@ -379,7 +377,7 @@ class MeshCLI:
         elif param == "public.key":
             # TODO: Get from identity
             return "Error: Not yet implemented"
-        
+
         elif param == "role":
             role = "room_server" if self.identity_type == "room_server" else "repeater"
             return f"> {role}"
@@ -430,15 +428,15 @@ class MeshCLI:
 
         else:
             return f"??: {param}"
-    
+
     # ==================== Set Commands ====================
-    
+
     def _cmd_set(self, param: str) -> str:
         """Handle set commands."""
         parts = param.split(None, 1)
         if len(parts) < 2:
             return "Error: Missing value"
-        
+
         key, value = parts[0], parts[1]
 
         try:
@@ -579,43 +577,43 @@ class MeshCLI:
 
             else:
                 return f"unknown config: {key}"
-                
+
         except ValueError as e:
             return f"Error: invalid value - {e}"
         except Exception as e:
             logger.error(f"Set command error: {e}")
             return f"Error: {e}"
-    
+
     # ==================== ACL Commands ====================
-    
+
     def _cmd_setperm(self, command: str) -> str:
         """Set permissions for a public key."""
         # Format: setperm {pubkey-hex} {permissions-int}
         parts = command[8:].split()
         if len(parts) < 2:
             return "Err - bad params"
-        
+
         pubkey_hex = parts[0]
         try:
             permissions = int(parts[1])
         except ValueError:
             return "Err - invalid permissions"
-        
+
         # TODO: Apply permissions via ACL
         logger.info(f"setperm command: {pubkey_hex} -> {permissions}")
         return "Error: Not yet implemented - use config file"
-    
+
     # ==================== Region Commands ====================
-    
+
     def _cmd_region(self, command: str) -> str:
         """Handle region commands."""
         parts = command.split()
-        
+
         if len(parts) == 1:
             return "Error: Region commands not implemented in Python repeater"
-        
+
         subcommand = parts[1]
-        
+
         if subcommand == "load":
             return "Error: Region commands not implemented"
         elif subcommand == "save":
@@ -624,42 +622,42 @@ class MeshCLI:
             return "Error: Region commands not implemented"
         else:
             return "Err - ??"
-    
+
     # ==================== Neighbor Commands ====================
-    
+
     def _cmd_neighbors(self) -> str:
         """List neighbors."""
         # TODO: Get neighbors from routing table
         return "Error: Not yet implemented"
-    
+
     def _cmd_neighbor_remove(self, command: str) -> str:
         """Remove a neighbor."""
         pubkey_hex = command[16:].strip()
-        
+
         if not pubkey_hex:
             return "ERR: Missing pubkey"
-        
+
         # TODO: Remove neighbor from routing table
         logger.info(f"neighbor.remove: {pubkey_hex}")
         return "Error: Not yet implemented"
-    
+
     # ==================== Temporary Radio Commands ====================
-    
+
     def _cmd_tempradio(self, command: str) -> str:
         """Apply temporary radio parameters."""
         # Format: tempradio {freq} {bw} {sf} {cr} {timeout_mins}
         parts = command[10:].split()
-        
+
         if len(parts) < 5:
             return "Error: Expected freq bw sf cr timeout_mins"
-        
+
         try:
             freq = float(parts[0])
             bw = float(parts[1])
             sf = int(parts[2])
             cr = int(parts[3])
             timeout_mins = int(parts[4])
-            
+
             # Validate
             if not (300.0 <= freq <= 2500.0):
                 return "Error: invalid frequency"
@@ -671,16 +669,16 @@ class MeshCLI:
                 return "Error: invalid coding rate"
             if timeout_mins <= 0:
                 return "Error: invalid timeout"
-            
+
             # TODO: Apply temporary radio parameters
             logger.info(f"tempradio: {freq}MHz {bw}kHz SF{sf} CR4/{cr} for {timeout_mins}min")
             return "Error: Not yet implemented"
-            
+
         except ValueError:
             return "Error, invalid params"
-    
+
     # ==================== Logging Commands ====================
-    
+
     def _cmd_log(self, command: str) -> str:
         """Handle log commands."""
         if command == "log start":

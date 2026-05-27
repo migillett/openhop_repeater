@@ -6,7 +6,7 @@ from repeater.identity_manager import IdentityManager
 
 
 class _FakeIdentity:
-    def __init__(self, pubkey: bytes, addr: bytes = b"\xAA\xBB"):
+    def __init__(self, pubkey: bytes, addr: bytes = b"\xaa\xbb"):
         self._pubkey = pubkey
         self._addr = addr
 
@@ -194,7 +194,7 @@ def test_cli_set_commands_apply_and_validate_ranges():
     assert cli._cmd_set("radio 900000000 250000 9 6").startswith("OK")
     assert cfg["radio"]["frequency"] == 900000000.0
 
-    assert cli._cmd_set("freq 868000000") .startswith("OK")
+    assert cli._cmd_set("freq 868000000").startswith("OK")
     assert cli._cmd_set("tx 17") == "OK"
     assert cli._cmd_set("guest.password gpw") == "OK"
     assert cli._cmd_set("allow.read.only off") == "OK"
@@ -251,7 +251,7 @@ def test_cli_setperm_region_neighbor_tempradio_log_paths():
     assert cli._cmd_neighbor_remove("neighbor.remove   ") == "ERR: Missing pubkey"
     assert cli._cmd_neighbor_remove("neighbor.remove 001122").startswith("Error:")
 
-    assert cli._cmd_tempradio("tempradio 1 2 3") .startswith("Error:")
+    assert cli._cmd_tempradio("tempradio 1 2 3").startswith("Error:")
     assert cli._cmd_tempradio("tempradio 299 125 7 5 10") == "Error: invalid frequency"
     assert cli._cmd_tempradio("tempradio 915 6 7 5 10") == "Error: invalid bandwidth"
     assert cli._cmd_tempradio("tempradio 915 125 4 5 10") == "Error: invalid spreading factor"

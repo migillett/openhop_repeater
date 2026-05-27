@@ -20,6 +20,7 @@ logger = logging.getLogger("AdvertHelper")
 
 class MeshActivityTier(Enum):
     """Mesh activity levels for adaptive rate limiting."""
+
     QUIET = "quiet"
     NORMAL = "normal"
     BUSY = "busy"
@@ -28,10 +29,10 @@ class MeshActivityTier(Enum):
 
 # Tier multipliers for rate limit scaling
 TIER_MULTIPLIERS = {
-    MeshActivityTier.QUIET: 0.0,       # No rate limiting
-    MeshActivityTier.NORMAL: 0.5,      # Light limiting
-    MeshActivityTier.BUSY: 1.0,        # Standard limiting
-    MeshActivityTier.CONGESTED: 2.0,   # Aggressive limiting
+    MeshActivityTier.QUIET: 0.0,  # No rate limiting
+    MeshActivityTier.NORMAL: 0.5,  # Light limiting
+    MeshActivityTier.BUSY: 1.0,  # Standard limiting
+    MeshActivityTier.CONGESTED: 2.0,  # Aggressive limiting
 }
 
 
@@ -50,10 +51,10 @@ class AdvertHelper:
         self.local_identity = local_identity
         self.storage = storage
         self.config = config or {}
-        
+
         # Create AdvertHandler internally as a parsing utility
         self.advert_handler = AdvertHandler(log_fn=log_fn or logger.info)
-        
+
         # Cache for tracking known neighbors (avoid repeated database queries)
         self._known_neighbors = set()
 
@@ -63,8 +64,10 @@ class AdvertHelper:
         adaptive_cfg = repeater_cfg.get("advert_adaptive", {})
         self._adaptive_enabled = bool(adaptive_cfg.get("enabled", True))
         self._ewma_alpha = max(0.01, min(1.0, float(adaptive_cfg.get("ewma_alpha", 0.1))))
-        self._tier_hysteresis_seconds = max(0.0, float(adaptive_cfg.get("hysteresis_seconds", 300.0)))
-        
+        self._tier_hysteresis_seconds = max(
+            0.0, float(adaptive_cfg.get("hysteresis_seconds", 300.0))
+        )
+
         # Tier thresholds (packets per minute)
         thresholds = adaptive_cfg.get("thresholds", {})
         self._threshold_normal = float(thresholds.get("normal", 1.0))
@@ -76,15 +79,21 @@ class AdvertHelper:
         self._rate_limit_enabled = bool(rate_cfg.get("enabled", True))
         self._base_bucket_capacity = max(1.0, float(rate_cfg.get("bucket_capacity", 2)))
         self._base_refill_tokens = max(0.1, float(rate_cfg.get("refill_tokens", 1.0)))
-        self._base_refill_interval = max(1.0, float(rate_cfg.get("refill_interval_seconds", 36000.0)))
+        self._base_refill_interval = max(
+            1.0, float(rate_cfg.get("refill_interval_seconds", 36000.0))
+        )
         self._base_min_interval = max(0.0, float(rate_cfg.get("min_interval_seconds", 3600.0)))
 
         # --- Penalty box config ---
         penalty_cfg = repeater_cfg.get("advert_penalty_box", {})
         self._penalty_enabled = bool(penalty_cfg.get("enabled", True))
         self._penalty_violation_threshold = max(1, int(penalty_cfg.get("violation_threshold", 2)))
-        self._penalty_decay_seconds = max(1.0, float(penalty_cfg.get("violation_decay_seconds", 43200.0)))
-        self._penalty_base_seconds = max(1.0, float(penalty_cfg.get("base_penalty_seconds", 21600.0)))
+        self._penalty_decay_seconds = max(
+            1.0, float(penalty_cfg.get("violation_decay_seconds", 43200.0))
+        )
+        self._penalty_base_seconds = max(
+            1.0, float(penalty_cfg.get("base_penalty_seconds", 21600.0))
+        )
         self._penalty_multiplier = max(1.0, float(penalty_cfg.get("penalty_multiplier", 2.0)))
         self._penalty_max_seconds = max(
             self._penalty_base_seconds,
@@ -123,11 +132,11 @@ class AdvertHelper:
         self._stats_adverts_dropped = 0
         self._stats_advert_duplicates = 0
         self._stats_tier_changes = 0
-        
+
         # Recent drops tracking — bounded deque so append is O(1) and the
         # oldest entry is evicted automatically (no pop(0) O(n) shift needed).
         self._recent_drops: deque = deque(maxlen=20)
-        
+
         # Memory management
         self._last_cleanup = time.time()
         self._cleanup_interval_seconds = 3600.0  # Clean up every hour
@@ -157,33 +166,31 @@ class AdvertHelper:
         while len(self._recent_advert_hashes) > self._advert_dedupe_max_hashes:
             self._recent_advert_hashes.popitem(last=False)
 
-
         expired_penalties = [pk for pk, until in self._penalty_until.items() if until < now]
         for pk in expired_penalties:
             del self._penalty_until[pk]
-        
 
         inactive_pubkeys = [
-            pk for pk, state in self._bucket_state.items()
+            pk
+            for pk, state in self._bucket_state.items()
             if now - state.get("last_seen", 0) > self._bucket_state_retention_seconds
         ]
         for pk in inactive_pubkeys:
             del self._bucket_state[pk]
             if pk in self._violation_state:
                 del self._violation_state[pk]
-        
+
         # 3. Decay old violations based on decay time
         for pk, vstate in list(self._violation_state.items()):
             last_violation = vstate.get("last_violation", 0)
             if now - last_violation > self._penalty_decay_seconds:
                 # Reset violation count after decay period
                 vstate["count"] = 0
-        
+
         if len(self._bucket_state) > self._max_tracked_pubkeys:
             # Sort by last_seen and remove oldest 10%
             sorted_pubkeys = sorted(
-                self._bucket_state.items(),
-                key=lambda x: x[1].get("last_seen", 0)
+                self._bucket_state.items(), key=lambda x: x[1].get("last_seen", 0)
             )
             to_remove = int(len(sorted_pubkeys) * 0.1)
             for pk, _ in sorted_pubkeys[:to_remove]:
@@ -192,12 +199,12 @@ class AdvertHelper:
                     del self._violation_state[pk]
                 if pk in self._penalty_until:
                     del self._penalty_until[pk]
-        
+
         # 5. Limit known neighbors set to prevent unbounded growth
         if len(self._known_neighbors) > 1000:
             # itertools.islice avoids materialising the full list first (O(n) → O(k))
             self._known_neighbors = set(itertools.islice(self._known_neighbors, 500))
-        
+
         if expired_penalties or inactive_pubkeys:
             logger.debug(
                 f"Cleaned up {len(expired_penalties)} expired penalties, "
@@ -235,7 +242,9 @@ class AdvertHelper:
     # Adaptive tier calculation
     # -------------------------------------------------------------------------
 
-    def _update_metrics_window(self, now: float, is_advert: bool = True, is_duplicate: bool = False) -> None:
+    def _update_metrics_window(
+        self, now: float, is_advert: bool = True, is_duplicate: bool = False
+    ) -> None:
         """Update rolling metrics window and EWMA."""
         elapsed = now - self._last_metrics_update
 
@@ -243,9 +252,7 @@ class AdvertHelper:
             # Calculate rates for window
             adverts_per_min = (self._adverts_in_window / elapsed) * 60.0
             packets_per_min = (self._packets_in_window / elapsed) * 60.0
-            dup_ratio = (
-                self._duplicates_in_window / max(1, self._packets_in_window)
-            )
+            dup_ratio = self._duplicates_in_window / max(1, self._packets_in_window)
 
             # Update EWMA
             alpha = self._ewma_alpha
@@ -258,7 +265,7 @@ class AdvertHelper:
             self._packets_in_window = 0
             self._duplicates_in_window = 0
             self._last_metrics_update = now
-            
+
             # Periodic cleanup
             if now - self._last_cleanup >= self._cleanup_interval_seconds:
                 self._cleanup_old_state(now)
@@ -343,7 +350,7 @@ class AdvertHelper:
     def _refill_tokens_if_needed(self, pubkey: str, now: float) -> dict:
         """Refill token bucket using effective (tier-scaled) limits."""
         bucket_cap, refill_tokens, refill_interval, _ = self._get_effective_limits()
-        
+
         state = self._bucket_state.get(pubkey)
         if state is None:
             state = {
@@ -405,7 +412,7 @@ class AdvertHelper:
         # Update metrics and tier
         self._update_metrics_window(now, is_advert=True)
         self._update_tier(now)
-        
+
         if not self._rate_limit_enabled:
             self._stats_adverts_allowed += 1
             return True, ""
@@ -454,22 +461,24 @@ class AdvertHelper:
         """Get comprehensive rate limiting and adaptive tier statistics."""
         now = time.time()
         bucket_cap, refill_tokens, refill_interval, min_interval = self._get_effective_limits()
-        
+
         # Active penalties
         active_penalties = {
             pk[:16]: round(until - now, 1)
             for pk, until in self._penalty_until.items()
             if until > now
         }
-        
+
         # Per-pubkey bucket states
         bucket_summary = {}
         for pk, state in self._bucket_state.items():
             bucket_summary[pk[:16]] = {
                 "tokens": round(state["tokens"], 2),
-                "last_seen_ago": round(now - state["last_seen"], 1) if state["last_seen"] > 0 else None,
+                "last_seen_ago": round(now - state["last_seen"], 1)
+                if state["last_seen"] > 0
+                else None,
             }
-        
+
         return {
             "adaptive": {
                 "enabled": self._adaptive_enabled,
@@ -494,7 +503,8 @@ class AdvertHelper:
                 "adverts_dropped": self._stats_adverts_dropped,
                 "adverts_duplicate_reheard": self._stats_advert_duplicates,
                 "drop_rate": round(
-                    self._stats_adverts_dropped / max(1, self._stats_adverts_allowed + self._stats_adverts_dropped),
+                    self._stats_adverts_dropped
+                    / max(1, self._stats_adverts_allowed + self._stats_adverts_dropped),
                     3,
                 ),
             },
@@ -512,7 +522,7 @@ class AdvertHelper:
                     "pubkey": drop["pubkey"],
                     "name": drop["name"],
                     "reason": drop["reason"],
-                    "seconds_ago": round(now - drop["timestamp"], 1)
+                    "seconds_ago": round(now - drop["timestamp"], 1),
                 }
                 for drop in reversed(self._recent_drops)  # Most recent first
             ],
@@ -534,16 +544,16 @@ class AdvertHelper:
             # Set signal metrics on packet for handler to use
             packet._snr = snr
             packet._rssi = rssi
-            
+
             # Use AdvertHandler to parse the packet - it now returns parsed data
             advert_data = await self.advert_handler(packet)
-            
+
             if not advert_data or not advert_data.get("valid"):
                 logger.warning("Invalid advert packet received, dropping.")
                 packet.mark_do_not_retransmit()
                 packet.drop_reason = "Invalid advert packet"
                 return
-            
+
             # Extract data from parsed advert
             pubkey = advert_data["public_key"]
             node_name = advert_data["name"]
@@ -568,10 +578,10 @@ class AdvertHelper:
                 logger.warning(f"Dropping advert from '{node_name}' ({pubkey[:16]}...): {reason}")
                 packet.mark_do_not_retransmit()
                 packet.drop_reason = reason
-                
+
                 # Track recent drop (deduplicate by pubkey)
                 pubkey_short = pubkey[:16]
-                
+
                 # Remove any existing entry for this pubkey, then append the
                 # updated record.  Rebuilding as a deque preserves maxlen so
                 # the oldest entry is evicted automatically — no pop(0) needed.
@@ -579,15 +589,12 @@ class AdvertHelper:
                     (d for d in self._recent_drops if d["pubkey"] != pubkey_short),
                     maxlen=20,
                 )
-                self._recent_drops.append({
-                    "pubkey": pubkey_short,
-                    "name": node_name,
-                    "reason": reason,
-                    "timestamp": now
-                })
-                
+                self._recent_drops.append(
+                    {"pubkey": pubkey_short, "name": node_name, "reason": reason, "timestamp": now}
+                )
+
                 return
-            
+
             # Skip our own adverts
             if self.local_identity:
                 local_pubkey = self.local_identity.get_public_key().hex()
@@ -605,24 +612,22 @@ class AdvertHelper:
             if pubkey not in self._known_neighbors:
                 # Only check database if not in cache
                 if self.storage:
-                    current_neighbors = await asyncio.to_thread(
-                        self.storage.get_neighbors
-                    )
+                    current_neighbors = await asyncio.to_thread(self.storage.get_neighbors)
                 else:
                     current_neighbors = {}
                 is_new_neighbor = pubkey not in current_neighbors
-                
+
                 if is_new_neighbor:
                     self._known_neighbors.add(pubkey)
                     logger.info(f"Discovered new neighbor: {node_name} ({pubkey[:16]}...)")
             else:
                 is_new_neighbor = False
-            
+
             # Determine zero-hop: direct routes are always zero-hop,
             # flood routes are zero-hop if path_len <= 1 (received directly)
             path_len = len(packet.path) if packet.path else 0
             zero_hop = path_len == 0
-            
+
             # Build advert record
             advert_record = {
                 "timestamp": current_time,
@@ -638,7 +643,7 @@ class AdvertHelper:
                 "is_new_neighbor": is_new_neighbor,
                 "zero_hop": zero_hop,
             }
-            
+
             # Store to database (run in thread so event loop stays responsive;
             # blocking here can cause companion TCP clients to disconnect)
             if self.storage:
@@ -649,7 +654,7 @@ class AdvertHelper:
                     )
                 except Exception as e:
                     logger.error(f"Failed to store advert record: {e}")
-        
+
         except Exception as e:
             logger.error(f"Error processing advert packet: {e}", exc_info=True)
 
@@ -662,8 +667,10 @@ class AdvertHelper:
             adaptive_cfg = repeater_cfg.get("advert_adaptive", {})
             self._adaptive_enabled = bool(adaptive_cfg.get("enabled", True))
             self._ewma_alpha = max(0.01, min(1.0, float(adaptive_cfg.get("ewma_alpha", 0.1))))
-            self._tier_hysteresis_seconds = max(0.0, float(adaptive_cfg.get("hysteresis_seconds", 300.0)))
-            
+            self._tier_hysteresis_seconds = max(
+                0.0, float(adaptive_cfg.get("hysteresis_seconds", 300.0))
+            )
+
             thresholds = adaptive_cfg.get("thresholds", {})
             self._threshold_normal = float(thresholds.get("normal", 1.0))
             self._threshold_busy = float(thresholds.get("busy", 5.0))
@@ -674,15 +681,23 @@ class AdvertHelper:
             self._rate_limit_enabled = bool(rate_cfg.get("enabled", True))
             self._base_bucket_capacity = max(1.0, float(rate_cfg.get("bucket_capacity", 2)))
             self._base_refill_tokens = max(0.1, float(rate_cfg.get("refill_tokens", 1.0)))
-            self._base_refill_interval = max(1.0, float(rate_cfg.get("refill_interval_seconds", 36000.0)))
+            self._base_refill_interval = max(
+                1.0, float(rate_cfg.get("refill_interval_seconds", 36000.0))
+            )
             self._base_min_interval = max(0.0, float(rate_cfg.get("min_interval_seconds", 3600.0)))
 
             # Penalty box config
             penalty_cfg = repeater_cfg.get("advert_penalty_box", {})
             self._penalty_enabled = bool(penalty_cfg.get("enabled", True))
-            self._penalty_violation_threshold = max(1, int(penalty_cfg.get("violation_threshold", 2)))
-            self._penalty_decay_seconds = max(1.0, float(penalty_cfg.get("violation_decay_seconds", 43200.0)))
-            self._penalty_base_seconds = max(1.0, float(penalty_cfg.get("base_penalty_seconds", 21600.0)))
+            self._penalty_violation_threshold = max(
+                1, int(penalty_cfg.get("violation_threshold", 2))
+            )
+            self._penalty_decay_seconds = max(
+                1.0, float(penalty_cfg.get("violation_decay_seconds", 43200.0))
+            )
+            self._penalty_base_seconds = max(
+                1.0, float(penalty_cfg.get("base_penalty_seconds", 21600.0))
+            )
             self._penalty_multiplier = max(1.0, float(penalty_cfg.get("penalty_multiplier", 2.0)))
             self._penalty_max_seconds = max(
                 self._penalty_base_seconds,

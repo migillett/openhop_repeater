@@ -54,7 +54,7 @@ class AirtimeManager:
             Airtime in milliseconds
         """
         sf = spreading_factor or self.spreading_factor
-        bw_hz = (bandwidth_hz or self.bandwidth)
+        bw_hz = bandwidth_hz or self.bandwidth
         cr = coding_rate or self.coding_rate
         preamble_len = preamble_len or self.preamble_length
         crc = 1 if crc_enabled else 0
@@ -64,7 +64,7 @@ class AirtimeManager:
         de = 1 if (sf >= 11 and bw_hz <= 125000) else 0
 
         # Symbol time in milliseconds: T_sym = 2^SF / BW_kHz
-        t_sym = (2 ** sf) / (bw_hz / 1000)
+        t_sym = (2**sf) / (bw_hz / 1000)
 
         # Preamble time: T_preamble = (n_preamble + 4.25) * T_sym
         t_preamble = (preamble_len + 4.25) * t_sym

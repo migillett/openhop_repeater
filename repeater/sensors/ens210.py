@@ -23,10 +23,10 @@ from .base import SensorBase
 from .registry import SensorRegistry
 
 # ENS210 register addresses
-_REG_SENS_RUN   = 0x21
+_REG_SENS_RUN = 0x21
 _REG_SENS_START = 0x22
-_REG_T_VAL      = 0x30
-_REG_H_VAL      = 0x33
+_REG_T_VAL = 0x30
+_REG_H_VAL = 0x33
 
 
 @SensorRegistry.register("ens210")
@@ -39,7 +39,9 @@ class ENS210Sensor(SensorBase):
         self.i2c_address = int(self.settings.get("i2c_address", 0x43))
         self.bus_number = int(self.settings.get("bus_number", 1))
         self._poll_interval = 0.05  # 50 ms between validity checks
-        self._poll_attempts = max(1, int(float(self.settings.get("read_timeout_seconds", 1.0)) / self._poll_interval))
+        self._poll_attempts = max(
+            1, int(float(self.settings.get("read_timeout_seconds", 1.0)) / self._poll_interval)
+        )
 
         self.available = False
         if not self.ensure_python_modules(

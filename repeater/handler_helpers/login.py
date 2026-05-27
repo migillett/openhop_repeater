@@ -19,7 +19,7 @@ class LoginHelper:
         self.identity_manager = identity_manager
         self.packet_injector = packet_injector
         self.log_fn = log_fn or logger.info
-        
+
         self.handlers = {}
         self.acls = {}  # Per-identity ACLs keyed by hash_byte
         self._pending_tasks = set()
@@ -44,19 +44,19 @@ class LoginHelper:
         config = config or {}
 
         hash_byte = identity.get_public_key()[0]
-        
+
         # Create ACL for this identity
         from repeater.handler_helpers.acl import ACL
-        
+
         # Get security config for this identity
         if identity_type == "room_server":
             # Room servers use passwords from their settings section only
             settings = config.get("settings", {})
-            
+
             # Empty strings ('') are treated as "not set" by using 'or None'
             admin_password = settings.get("admin_password") or None
             guest_password = settings.get("guest_password") or None
-            
+
             # Validate room servers have passwords configured
             if not admin_password and not guest_password:
                 logger.error(
@@ -64,7 +64,7 @@ class LoginHelper:
                     f"Add them to 'settings' section. Skipping registration."
                 )
                 return
-            
+
             # Use configured passwords from settings
             final_security = {
                 "max_clients": settings.get("max_clients", 50),
@@ -75,18 +75,24 @@ class LoginHelper:
         else:
             # Repeater uses security from repeater.security in config
             security = config.get("repeater", {}).get("security", {})
+            admin_password = security.get("admin_password") or None
+            guest_password = security.get("guest_password") or None
             final_security = {
                 "max_clients": security.get("max_clients", 10),
-                "admin_password": security.get("admin_password", "admin123"),
-                "guest_password": security.get("guest_password", "guest123"),
-                "allow_read_only": security.get("allow_read_only", True),
+                "admin_password": admin_password,
+                "guest_password": guest_password,
+                "allow_read_only": security.get("allow_read_only", False),
             }
+            if not admin_password and not guest_password:
+                logger.warning(
+                    f"Repeater '{name}' has no admin/guest password configured; setup is required before login."
+                )
             logger.debug(
                 f"Repeater security config: admin_pw={'SET' if final_security['admin_password'] else 'NONE'}, "
                 f"guest_pw={'SET' if final_security['guest_password'] else 'NONE'}, "
                 f"max_clients={final_security['max_clients']}"
             )
-        
+
         # Create ACL for this identity
         identity_acl = ACL(
             max_clients=final_security["max_clients"],
@@ -94,7 +100,7 @@ class LoginHelper:
             guest_password=final_security["guest_password"],
             allow_read_only=final_security["allow_read_only"],
         )
-        
+
         self.acls[hash_byte] = identity_acl
         logger.info(f"Created ACL for {identity_type} '{name}': hash=0x{hash_byte:02X}")
 
@@ -119,9 +125,9 @@ class LoginHelper:
             authenticate_callback=auth_callback_with_context,
             is_room_server=(identity_type == "room_server"),
         )
-        
+
         handler.set_send_packet_callback(self._send_packet_with_delay)
-        
+
         self.handlers[hash_byte] = handler
 
         logger.info(f"Registered {identity_type} '{name}' login handler: hash=0x{hash_byte:02X}")
@@ -131,9 +137,9 @@ class LoginHelper:
         try:
             if len(packet.payload) < 1:
                 return False
-            
+
             dest_hash = packet.payload[0]
-            
+
             handler = self.handlers.get(dest_hash)
             if handler:
                 logger.debug(f"Routing login to identity: hash=0x{dest_hash:02X}")
@@ -154,7 +160,7 @@ class LoginHelper:
             return False
 
     def _send_packet_with_delay(self, packet, delay_ms: int):
-   
+
         if self.packet_injector:
             task = asyncio.create_task(self._delayed_send(packet, delay_ms))
             self._track_task(task)
@@ -162,7 +168,7 @@ class LoginHelper:
             logger.error("No packet injector configured, cannot send login response")
 
     async def _delayed_send(self, packet, delay_ms: int):
- 
+
         await asyncio.sleep(delay_ms / 1000.0)
         try:
             await self.packet_injector(packet, wait_for_ack=False)
@@ -173,7 +179,7 @@ class LoginHelper:
     def get_acl_dict(self):
         """Return dictionary of ACLs keyed by identity hash."""
         return self.acls
-    
+
     def get_acl_for_identity(self, hash_byte: int):
         """Get ACL for a specific identity."""
         return self.acls.get(hash_byte)
@@ -183,7 +189,7 @@ class LoginHelper:
         if hash_byte is not None:
             acl = self.acls.get(hash_byte)
             return acl.get_all_clients() if acl else []
-        
+
         # Return clients from all ACLs
         all_clients = []
         for acl in self.acls.values():

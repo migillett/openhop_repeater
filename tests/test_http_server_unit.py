@@ -31,7 +31,9 @@ def test_doc_endpoint_routes_and_openapi_json_paths(monkeypatch):
     assert doc.index() == "docs-html"
     assert doc.docs() == "docs-html"
 
-    monkeypatch.setattr(cherrypy, "response", SimpleNamespace(headers={}, status=200), raising=False)
+    monkeypatch.setattr(
+        cherrypy, "response", SimpleNamespace(headers={}, status=200), raising=False
+    )
 
     # success path
     monkeypatch.setattr("builtins.open", lambda *args, **kwargs: io.StringIO("openapi: 3.0.0\n"))
@@ -90,7 +92,6 @@ def test_stats_app_index_error_paths(monkeypatch, tmp_path):
     with pytest.raises(cherrypy.HTTPError):
         app.index()
 
-
     # Force generic open() exception branch
     def _explode(*_args, **_kwargs):
         raise RuntimeError("boom")
@@ -107,15 +108,21 @@ def test_http_server_utility_methods(monkeypatch, tmp_path):
         self.token_manager = object()
 
     monkeypatch.setattr(hs.HTTPStatsServer, "_init_auth_handlers", _fake_init_auth)
-    monkeypatch.setattr(hs, "StatsApp", lambda *args, **kwargs: SimpleNamespace(api=SimpleNamespace(config_manager=object())))
+    monkeypatch.setattr(
+        hs,
+        "StatsApp",
+        lambda *args, **kwargs: SimpleNamespace(api=SimpleNamespace(config_manager=object())),
+    )
     monkeypatch.setattr(hs, "AuthEndpoints", lambda *args, **kwargs: object())
     monkeypatch.setattr(hs, "DocEndpoint", lambda *_args, **_kwargs: object())
 
-    server = hs.HTTPStatsServer(config={"web": {"cors_enabled": False}}, config_path=str(Path(tmp_path) / "cfg.yml"))
+    server = hs.HTTPStatsServer(
+        config={"web": {"cors_enabled": False}}, config_path=str(Path(tmp_path) / "cfg.yml")
+    )
 
     monkeypatch.setattr(cherrypy, "response", SimpleNamespace(headers={}), raising=False)
     out = server._json_error_handler(401, "no", "", "")
-    assert "\"success\": false" in out
+    assert '"success": false' in out
 
     install_called = {"v": False}
     monkeypatch.setattr(hs.cherrypy_cors, "install", lambda: install_called.__setitem__("v", True))
@@ -123,6 +130,11 @@ def test_http_server_utility_methods(monkeypatch, tmp_path):
     assert install_called["v"] is True
 
     exited = {"v": False}
-    monkeypatch.setattr(cherrypy, "engine", SimpleNamespace(exit=lambda: exited.__setitem__("v", True)), raising=False)
+    monkeypatch.setattr(
+        cherrypy,
+        "engine",
+        SimpleNamespace(exit=lambda: exited.__setitem__("v", True)),
+        raising=False,
+    )
     server.stop()
     assert exited["v"] is True

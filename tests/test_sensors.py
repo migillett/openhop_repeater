@@ -64,7 +64,9 @@ def _load_hardware_stats_sensor_module(monkeypatch):
     setattr(fake_hardware_stats, "HardwareStatsCollector", MagicMock)
 
     monkeypatch.setitem(sys.modules, "repeater.data_acquisition", fake_data_acquisition)
-    monkeypatch.setitem(sys.modules, "repeater.data_acquisition.hardware_stats", fake_hardware_stats)
+    monkeypatch.setitem(
+        sys.modules, "repeater.data_acquisition.hardware_stats", fake_hardware_stats
+    )
 
     module_name = "repeater.sensors._hardware_stats_test"
     module_path = Path(__file__).resolve().parents[1] / "repeater" / "sensors" / "hardware_stats.py"
@@ -289,7 +291,20 @@ def test_waveshare_ups_e_sensor_reads_pack_state(monkeypatch):
             values = {
                 waveshare_ups_e_module._REG_STATUS: [waveshare_ups_e_module._FLAG_CHARGING],
                 waveshare_ups_e_module._REG_VBUS: [0xA0, 0x0F, 0x2C, 0x01, 0x58, 0x1B],
-                waveshare_ups_e_module._REG_BATT: [0x80, 0x3E, 0xFA, 0x00, 0x4E, 0x00, 0x98, 0x08, 0x2D, 0x00, 0x5A, 0x00],
+                waveshare_ups_e_module._REG_BATT: [
+                    0x80,
+                    0x3E,
+                    0xFA,
+                    0x00,
+                    0x4E,
+                    0x00,
+                    0x98,
+                    0x08,
+                    0x2D,
+                    0x00,
+                    0x5A,
+                    0x00,
+                ],
                 waveshare_ups_e_module._REG_CELLS: [0x80, 0x0C, 0x6C, 0x0C, 0x1C, 0x0C, 0x76, 0x0C],
             }
             return values[register]

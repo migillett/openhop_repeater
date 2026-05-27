@@ -29,9 +29,9 @@ def generate_meshcore_keypair() -> Tuple[bytes, bytes]:
 
     # 3. Ed25519 scalar clamping on first 32 bytes
     clamped = bytearray(digest[:32])
-    clamped[0] &= 248    # Clear bottom 3 bits
-    clamped[31] &= 63    # Clear top 2 bits
-    clamped[31] |= 64    # Set bit 6
+    clamped[0] &= 248  # Clear bottom 3 bits
+    clamped[31] &= 63  # Clear top 2 bits
+    clamped[31] |= 64  # Set bit 6
 
     # 4. Derive public key
     public_key = crypto_scalarmult_ed25519_base_noclamp(bytes(clamped))

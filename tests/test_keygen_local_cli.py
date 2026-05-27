@@ -28,11 +28,13 @@ def test_generate_meshcore_keypair_clamps_scalar_and_shapes_output():
 
     def _fake_scalarmult(scalar_bytes):
         captured["scalar"] = scalar_bytes
-        return b"\xAA" * 32
+        return b"\xaa" * 32
 
     with (
         patch("repeater.keygen.secrets.token_bytes", return_value=seed),
-        patch("repeater.keygen.crypto_scalarmult_ed25519_base_noclamp", side_effect=_fake_scalarmult),
+        patch(
+            "repeater.keygen.crypto_scalarmult_ed25519_base_noclamp", side_effect=_fake_scalarmult
+        ),
     ):
         pub, priv = keygen.generate_meshcore_keypair()
 
@@ -42,7 +44,7 @@ def test_generate_meshcore_keypair_clamps_scalar_and_shapes_output():
     expected[31] &= 63
     expected[31] |= 64
 
-    assert pub == b"\xAA" * 32
+    assert pub == b"\xaa" * 32
     assert len(pub) == 32
     assert len(priv) == 64
     assert captured["scalar"] == bytes(expected)

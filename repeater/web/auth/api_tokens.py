@@ -22,22 +22,22 @@ class APITokenManager:
     def create_token(self, name: str) -> tuple[int, str]:
         plaintext_token = self.generate_api_token()
         token_hash = self.hash_token(plaintext_token)
-        
+
         token_id = self.db.create_api_token(name, token_hash)
-        
+
         logger.info(f"Created API token '{name}' with ID {token_id}")
         return token_id, plaintext_token
-    
+
     def verify_token(self, token: str) -> Optional[Dict]:
         token_hash = self.hash_token(token)
         return self.db.verify_api_token(token_hash)
-    
+
     def revoke_token(self, token_id: int) -> bool:
         deleted = self.db.revoke_api_token(token_id)
-        
+
         if deleted:
             logger.info(f"Revoked API token ID {token_id}")
-        
+
         return deleted
 
     def list_tokens(self) -> List[Dict]:

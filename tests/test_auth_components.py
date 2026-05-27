@@ -20,7 +20,9 @@ def test_jwt_handler_create_and_verify_and_invalid_cases():
     assert payload["sub"] == "admin"
     assert payload["client_id"] == "client-1"
 
-    expired = jwt.encode({"sub": "admin", "client_id": "c", "iat": 1, "exp": 1}, secret, algorithm="HS256")
+    expired = jwt.encode(
+        {"sub": "admin", "client_id": "c", "iat": 1, "exp": 1}, secret, algorithm="HS256"
+    )
     assert h.verify_jwt(expired) is None
     assert h.verify_jwt("not-a-token") is None
 

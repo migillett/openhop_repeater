@@ -1,7 +1,7 @@
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Optional
 
 try:
     import rrdtool
@@ -231,7 +231,7 @@ class RRDToolHandler:
 
             rrd_data = self.get_data(start_time, end_time)
             if not rrd_data or "packet_types" not in rrd_data:
-                logger.warning(f"No RRD data available")
+                logger.warning("No RRD data available")
                 return None
 
             type_totals = {}

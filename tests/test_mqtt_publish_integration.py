@@ -75,9 +75,7 @@ def _attach_capturing_client(conn) -> list:
     captured: list = []
 
     def _fake_publish(topic, payload, retain=False, qos=0):
-        captured.append(
-            {"topic": topic, "payload": payload, "retain": retain, "qos": qos}
-        )
+        captured.append({"topic": topic, "payload": payload, "retain": retain, "qos": qos})
         return None
 
     conn._running = True
@@ -150,9 +148,7 @@ def test_mqtt_published_packet_carries_semtech_duration_end_to_end():
     payload_dict = json.loads(publish["payload"])
     assert payload_dict["duration"] == expected_duration
     assert payload_dict["duration"] != "0", "duration must not be hard-coded zero"
-    assert 0 < int(payload_dict["duration"]) < 10_000, (
-        "duration should be a sane time-on-air in ms"
-    )
+    assert 0 < int(payload_dict["duration"]) < 10_000, "duration should be a sane time-on-air in ms"
 
     # Sanity: other key fields flowed through correctly.
     assert payload_dict["origin"] == "test-node"

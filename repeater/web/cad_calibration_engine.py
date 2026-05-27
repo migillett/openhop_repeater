@@ -3,13 +3,12 @@ import logging
 import random
 import threading
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger("HTTPServer")
 
 
 class CADCalibrationEngine:
-
     def __init__(self, daemon_instance=None, event_loop=None):
         self.daemon_instance = daemon_instance
         self.event_loop = event_loop
@@ -49,8 +48,8 @@ class CADCalibrationEngine:
                 baseline_result = await radio.perform_cad(det_peak=35, det_min=25, timeout=0.3)
                 if baseline_result:
                     baseline_detections += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"CAD baseline sample failed: {exc}")
             await asyncio.sleep(0.1)  # 100ms between baseline samples
 
         # Wait before actual test
@@ -62,8 +61,8 @@ class CADCalibrationEngine:
                 result = await radio.perform_cad(det_peak=det_peak, det_min=det_min, timeout=0.3)
                 if result:
                     detections += 1
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"CAD sample failed for det_peak={det_peak} det_min={det_min}: {exc}")
 
             # Variable delay to avoid sampling artifacts
             delay = 0.05 + (i % 3) * 0.05  # 50ms, 100ms, 150ms rotation

@@ -53,9 +53,7 @@ class TraceHelper:
         self.packet_injector = packet_injector  # Function to inject packets into router
 
         # Ping callback system - track pending ping requests by tag
-        self.pending_pings = (
-            {}
-        )  # {tag: {'event': asyncio.Event(), 'result': dict, 'target': int, 'sent_at': float}}
+        self.pending_pings = {}  # {tag: {'event': asyncio.Event(), 'result': dict, 'target': int, 'sent_at': float}}
 
         # Optional: when trace reaches final node, call this (packet, parsed_data) to push 0x89 to companions
         self.on_trace_complete = None  # async (packet, parsed_data) -> None
@@ -103,8 +101,7 @@ class TraceHelper:
                 rssi_val = getattr(packet, "rssi", 0)
                 if rssi_val == 0:
                     logger.warning(
-                        f"Ignoring trace response for tag {trace_tag} "
-                        "with RSSI=0 (no signal data)"
+                        f"Ignoring trace response for tag {trace_tag} with RSSI=0 (no signal data)"
                     )
                     return  # wait for a valid response or let timeout handle it
                 ping_info = self.pending_pings[trace_tag]

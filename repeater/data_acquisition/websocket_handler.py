@@ -27,17 +27,16 @@ _heartbeat_running = False
 
 
 class PacketWebSocket(WebSocket):
-  
     def opened(self):
         """Called when a WebSocket connection is established"""
         # Authenticate using JWT provided as query parameter (token=)
         jwt_handler = cherrypy.config.get("jwt_handler")
-        
+
         # Get query string from environ
         qs = ""
         if hasattr(self, "environ"):
             qs = self.environ.get("QUERY_STRING", "")
-        
+
         params = parse_qs(qs)
         token = params.get("token", [None])[0]
         client_id = params.get("client_id", [None])[0]
@@ -46,7 +45,7 @@ class PacketWebSocket(WebSocket):
             logger.warning("WebSocket connection rejected: no JWT handler configured")
             self.close(code=1011, reason="server configuration error")
             return
-            
+
         if not token:
             logger.warning("WebSocket connection rejected: missing token")
             self.close(code=1008, reason="unauthorized")
@@ -92,17 +91,17 @@ class PacketWebSocket(WebSocket):
             elif data.get("type") == "pong":
                 # Client responded to our ping
                 pass
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Ignoring malformed WebSocket message: {exc}")
 
 
 def broadcast_packet(packet_data: dict):
 
     if not _connected_clients:
         return
-    
+
     message = json.dumps({"type": "packet", "data": packet_data})
-    
+
     for client in list(_connected_clients):
         try:
             client.send(message)
@@ -115,9 +114,9 @@ def broadcast_stats(stats_data: dict):
 
     if not _connected_clients:
         return
-    
+
     message = json.dumps({"type": "stats", "data": stats_data})
-    
+
     for client in list(_connected_clients):
         try:
             client.send(message)
@@ -134,15 +133,15 @@ def has_connected_clients() -> bool:
 def _heartbeat_loop():
     """Background thread to send periodic pings to all connected clients"""
     global _heartbeat_running
-    
+
     while _heartbeat_running:
         time.sleep(PING_INTERVAL)
-        
+
         if not _connected_clients:
             continue
-        
+
         ping_message = json.dumps({"type": "ping"})
-        
+
         for client in list(_connected_clients):
             try:
                 client.send(ping_message)
@@ -154,10 +153,10 @@ def _heartbeat_loop():
 def init_websocket():
     """Initialize WebSocket plugin and start heartbeat"""
     global _heartbeat_thread, _heartbeat_running
-    
+
     WebSocketPlugin(cherrypy.engine).subscribe()
     cherrypy.tools.websocket = WebSocketTool()
-    
+
     # Start heartbeat thread
     if not _heartbeat_running:
         _heartbeat_running = True

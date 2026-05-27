@@ -11,6 +11,7 @@ objects to verify:
   - mark_seen / is_duplicate cache behaviour
   - do_not_retransmit flag handling
 """
+
 from unittest.mock import MagicMock, patch
 
 
@@ -106,12 +107,12 @@ class TestDuplicateSuppression:
     def test_same_packet_forwarded_twice_is_duplicate(self):
         """Forwarding the same packet a second time must be rejected as duplicate."""
         h = _make_handler()
-        pkt1 = _make_flood_packet(payload=b"\xDE\xAD")
+        pkt1 = _make_flood_packet(payload=b"\xde\xad")
         result1 = h.flood_forward(pkt1)
         assert result1 is not None
 
         # Same content in a fresh Packet object
-        pkt2 = _make_flood_packet(payload=b"\xDE\xAD")
+        pkt2 = _make_flood_packet(payload=b"\xde\xad")
         result2 = h.flood_forward(pkt2)
         assert result2 is None
         assert pkt2.drop_reason == "Duplicate"
@@ -128,7 +129,7 @@ class TestDuplicateSuppression:
     def test_mark_seen_makes_is_duplicate_true(self):
         """mark_seen records the hash; is_duplicate finds it."""
         h = _make_handler()
-        pkt = _make_flood_packet(payload=b"\xAA\xBB")
+        pkt = _make_flood_packet(payload=b"\xaa\xbb")
         assert not h.is_duplicate(pkt)
         h.mark_seen(pkt)
         assert h.is_duplicate(pkt)
@@ -149,10 +150,8 @@ class TestDuplicateSuppression:
         except for TRACE packets. Two flood packets with different paths
         but same payload have the same hash.
         """
-        pkt_a = _make_flood_packet(path_bytes=b"\x11", hash_size=1, hash_count=1,
-                                    payload=b"\xFF")
-        pkt_b = _make_flood_packet(path_bytes=b"\x22", hash_size=1, hash_count=1,
-                                    payload=b"\xFF")
+        pkt_a = _make_flood_packet(path_bytes=b"\x11", hash_size=1, hash_count=1, payload=b"\xff")
+        pkt_b = _make_flood_packet(path_bytes=b"\x22", hash_size=1, hash_count=1, payload=b"\xff")
         assert pkt_a.calculate_packet_hash() == pkt_b.calculate_packet_hash()
 
     def test_seen_cache_eviction(self):
@@ -183,62 +182,53 @@ class TestLoopDetection1Byte:
 
     def test_loop_detect_off_allows_own_hash(self):
         """With loop_detect=off, packet with our hash in path is forwarded."""
-        h = _make_handler(loop_detect="off",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        h = _make_handler(loop_detect="off", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         # Path contains our 1-byte hash (0xAB) once
-        pkt = _make_flood_packet(b"\xAB", hash_size=1, hash_count=1)
+        pkt = _make_flood_packet(b"\xab", hash_size=1, hash_count=1)
         result = h.flood_forward(pkt)
         assert result is not None
 
     def test_loop_detect_strict_blocks_single_occurrence(self):
         """strict mode (threshold=1): one occurrence of our hash → loop."""
-        h = _make_handler(loop_detect="strict",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_flood_packet(b"\xAB", hash_size=1, hash_count=1)
+        h = _make_handler(loop_detect="strict", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        pkt = _make_flood_packet(b"\xab", hash_size=1, hash_count=1)
         result = h.flood_forward(pkt)
         assert result is None
         assert "loop" in pkt.drop_reason.lower()
 
     def test_loop_detect_moderate_allows_one_occurrence(self):
         """moderate mode (threshold=2): one occurrence is fine."""
-        h = _make_handler(loop_detect="moderate",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_flood_packet(b"\x11\xAB", hash_size=1, hash_count=2)
+        h = _make_handler(loop_detect="moderate", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        pkt = _make_flood_packet(b"\x11\xab", hash_size=1, hash_count=2)
         result = h.flood_forward(pkt)
         assert result is not None
 
     def test_loop_detect_moderate_blocks_two_occurrences(self):
         """moderate mode (threshold=2): two occurrences → loop."""
-        h = _make_handler(loop_detect="moderate",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_flood_packet(b"\xAB\x11\xAB", hash_size=1, hash_count=3)
+        h = _make_handler(loop_detect="moderate", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        pkt = _make_flood_packet(b"\xab\x11\xab", hash_size=1, hash_count=3)
         result = h.flood_forward(pkt)
         assert result is None
         assert "loop" in pkt.drop_reason.lower()
 
     def test_loop_detect_minimal_allows_three_occurrences(self):
         """minimal mode (threshold=4): three occurrences still OK."""
-        h = _make_handler(loop_detect="minimal",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_flood_packet(b"\xAB\x11\xAB\x22\xAB", hash_size=1, hash_count=5)
+        h = _make_handler(loop_detect="minimal", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        pkt = _make_flood_packet(b"\xab\x11\xab\x22\xab", hash_size=1, hash_count=5)
         result = h.flood_forward(pkt)
         assert result is not None
 
     def test_loop_detect_minimal_blocks_four_occurrences(self):
         """minimal mode (threshold=4): four occurrences → loop."""
-        h = _make_handler(loop_detect="minimal",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_flood_packet(
-            b"\xAB\x11\xAB\x22\xAB\x33\xAB", hash_size=1, hash_count=7
-        )
+        h = _make_handler(loop_detect="minimal", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        pkt = _make_flood_packet(b"\xab\x11\xab\x22\xab\x33\xab", hash_size=1, hash_count=7)
         result = h.flood_forward(pkt)
         assert result is None
         assert "loop" in pkt.drop_reason.lower()
 
     def test_loop_detect_no_match_passes(self):
         """Strict mode still passes if our hash is not in the path."""
-        h = _make_handler(loop_detect="strict",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        h = _make_handler(loop_detect="strict", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         pkt = _make_flood_packet(b"\x11\x22\x33", hash_size=1, hash_count=3)
         result = h.flood_forward(pkt)
         assert result is not None
@@ -261,15 +251,13 @@ class TestOwnHashReForwarding:
         Receiving an identical packet is a duplicate.
         """
         h = _make_handler(loop_detect="off")
-        pkt = _make_flood_packet(b"\x11", hash_size=1, hash_count=1,
-                                  payload=b"\xAA\xBB")
+        pkt = _make_flood_packet(b"\x11", hash_size=1, hash_count=1, payload=b"\xaa\xbb")
         result = h.flood_forward(pkt)
         assert result is not None
         # The original packet's payload hash was marked seen
 
         # Receiving same original packet again (before our hop was appended)
-        pkt2 = _make_flood_packet(b"\x11", hash_size=1, hash_count=1,
-                                   payload=b"\xAA\xBB")
+        pkt2 = _make_flood_packet(b"\x11", hash_size=1, hash_count=1, payload=b"\xaa\xbb")
         result2 = h.flood_forward(pkt2)
         assert result2 is None
         assert pkt2.drop_reason == "Duplicate"
@@ -283,8 +271,7 @@ class TestOwnHashReForwarding:
         h = _make_handler(loop_detect="strict", local_hash_bytes=our_hash)
 
         # Original packet arrives, we forward (appending 0xAB)
-        pkt = _make_flood_packet(b"\x11", hash_size=1, hash_count=1,
-                                  payload=b"\xDD\xEE")
+        pkt = _make_flood_packet(b"\x11", hash_size=1, hash_count=1, payload=b"\xdd\xee")
         result = h.flood_forward(pkt)
         assert result is not None
         # Now path is [0x11, 0xAB], and this exact payload is in seen_packets
@@ -293,8 +280,10 @@ class TestOwnHashReForwarding:
         # so it's a new payload in the packet hash sense (different path iteration)
         # but path contains our hash 0xAB
         looped_pkt = _make_flood_packet(
-            b"\x11\xAB\x22", hash_size=1, hash_count=3,
-            payload=b"\xDD\xEE\xFF"  # different payload → not a duplicate
+            b"\x11\xab\x22",
+            hash_size=1,
+            hash_count=3,
+            payload=b"\xdd\xee\xff",  # different payload → not a duplicate
         )
         result2 = h.flood_forward(looped_pkt)
         assert result2 is None
@@ -328,25 +317,22 @@ class TestLoopDetectionMultiByte:
         In 2-byte mode, a partial byte overlap (0xABxx) is not a loop unless
         the full 2-byte local hash (0xABCD) matches a hop.
         """
-        h = _make_handler(loop_detect="strict",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        h = _make_handler(loop_detect="strict", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         # Path hop is AB11; local 2-byte hash is ABCD.
-        pkt = _make_flood_packet(b"\xAB\x11", hash_size=2, hash_count=1)
+        pkt = _make_flood_packet(b"\xab\x11", hash_size=2, hash_count=1)
         result = h.flood_forward(pkt)
         assert result is not None
 
     def test_2_byte_mode_off_ignores_byte_match(self):
         """With loop_detect=off, even byte-level 0xAB matches are ignored."""
-        h = _make_handler(loop_detect="off",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_flood_packet(b"\xAB\x11", hash_size=2, hash_count=1)
+        h = _make_handler(loop_detect="off", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        pkt = _make_flood_packet(b"\xab\x11", hash_size=2, hash_count=1)
         result = h.flood_forward(pkt)
         assert result is not None
 
     def test_2_byte_no_local_hash_byte_passes_strict(self):
         """If local_hash byte doesn't appear anywhere in the 2-byte path, strict passes."""
-        h = _make_handler(loop_detect="strict",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        h = _make_handler(loop_detect="strict", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         # Path: [0x11, 0x22] — no 0xAB byte
         pkt = _make_flood_packet(b"\x11\x22", hash_size=2, hash_count=1)
         result = h.flood_forward(pkt)
@@ -354,10 +340,9 @@ class TestLoopDetectionMultiByte:
 
     def test_3_byte_mode_partial_byte_match_does_not_loop(self):
         """In 3-byte mode, partial byte overlap is not enough to trigger strict."""
-        h = _make_handler(loop_detect="strict",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        h = _make_handler(loop_detect="strict", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         # Hop 11AB33 does not equal local 3-byte hash ABCDEF.
-        pkt = _make_flood_packet(b"\x11\xAB\x33", hash_size=3, hash_count=1)
+        pkt = _make_flood_packet(b"\x11\xab\x33", hash_size=3, hash_count=1)
         result = h.flood_forward(pkt)
         assert result is not None
 
@@ -366,10 +351,9 @@ class TestLoopDetectionMultiByte:
         moderate threshold=2 counts full 2-byte hash matches only.
         Two hops with ABxx but not ABCD must not loop.
         """
-        h = _make_handler(loop_detect="moderate",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        h = _make_handler(loop_detect="moderate", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         # Two 2-byte hops: AB11 and AB22 (neither equals ABCD)
-        pkt = _make_flood_packet(b"\xAB\x11\xAB\x22", hash_size=2, hash_count=2)
+        pkt = _make_flood_packet(b"\xab\x11\xab\x22", hash_size=2, hash_count=2)
         result = h.flood_forward(pkt)
         assert result is not None
 
@@ -378,14 +362,13 @@ class TestLoopDetectionMultiByte:
         After flood_forward in 2-byte mode, verify the path contains
         only the expected bytes (no extra, no corruption).
         """
-        h = _make_handler(loop_detect="off",
-                          local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
+        h = _make_handler(loop_detect="off", local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         pkt = _make_flood_packet(b"\x11\x22", hash_size=2, hash_count=1)
         result = h.flood_forward(pkt)
         assert result is not None
         assert result.get_path_hash_count() == 2
         hashes = result.get_path_hashes()
-        assert hashes == [b"\x11\x22", b"\xAB\xCD"]
+        assert hashes == [b"\x11\x22", b"\xab\xcd"]
 
 
 # ===================================================================
@@ -494,8 +477,10 @@ class TestValidatePacket:
         pkt = _make_flood_packet(bytes(63), hash_size=1, hash_count=63)
         result = h.flood_forward(pkt)
         assert result is None
-        assert "maximum" in (pkt.drop_reason or "").lower() or \
-               "exceed" in (pkt.drop_reason or "").lower()
+        assert (
+            "maximum" in (pkt.drop_reason or "").lower()
+            or "exceed" in (pkt.drop_reason or "").lower()
+        )
 
 
 # ===================================================================
@@ -510,10 +495,8 @@ class TestSerializationAfterForward:
     """
 
     def test_forwarded_1_byte_round_trips(self):
-        h = _make_handler(loop_detect="moderate",
-                          local_hash_bytes=bytes([0x42, 0x00, 0x00]))
-        pkt = _make_flood_packet(b"\x11\x22", hash_size=1, hash_count=2,
-                                  payload=b"\xAA\xBB")
+        h = _make_handler(loop_detect="moderate", local_hash_bytes=bytes([0x42, 0x00, 0x00]))
+        pkt = _make_flood_packet(b"\x11\x22", hash_size=1, hash_count=2, payload=b"\xaa\xbb")
         result = h.flood_forward(pkt)
         assert result is not None
         wire = result.write_to()
@@ -521,13 +504,11 @@ class TestSerializationAfterForward:
         pkt2.read_from(wire)
         assert pkt2.get_path_hash_count() == 3
         assert pkt2.get_path_hashes() == [b"\x11", b"\x22", b"\x42"]
-        assert pkt2.get_payload() == b"\xAA\xBB"
+        assert pkt2.get_payload() == b"\xaa\xbb"
 
     def test_forwarded_2_byte_round_trips(self):
-        h = _make_handler(loop_detect="off",
-                          local_hash_bytes=bytes([0xAA, 0xBB, 0xCC]))
-        pkt = _make_flood_packet(b"\x11\x22", hash_size=2, hash_count=1,
-                                  payload=b"\xDE\xAD")
+        h = _make_handler(loop_detect="off", local_hash_bytes=bytes([0xAA, 0xBB, 0xCC]))
+        pkt = _make_flood_packet(b"\x11\x22", hash_size=2, hash_count=1, payload=b"\xde\xad")
         result = h.flood_forward(pkt)
         assert result is not None
         wire = result.write_to()
@@ -535,13 +516,11 @@ class TestSerializationAfterForward:
         pkt2.read_from(wire)
         assert pkt2.get_path_hash_size() == 2
         assert pkt2.get_path_hash_count() == 2
-        assert pkt2.get_path_hashes() == [b"\x11\x22", b"\xAA\xBB"]
+        assert pkt2.get_path_hashes() == [b"\x11\x22", b"\xaa\xbb"]
 
     def test_forwarded_3_byte_round_trips(self):
-        h = _make_handler(loop_detect="off",
-                          local_hash_bytes=bytes([0xAA, 0xBB, 0xCC]))
-        pkt = _make_flood_packet(b"\x11\x22\x33", hash_size=3, hash_count=1,
-                                  payload=b"\xBE\xEF")
+        h = _make_handler(loop_detect="off", local_hash_bytes=bytes([0xAA, 0xBB, 0xCC]))
+        pkt = _make_flood_packet(b"\x11\x22\x33", hash_size=3, hash_count=1, payload=b"\xbe\xef")
         result = h.flood_forward(pkt)
         assert result is not None
         wire = result.write_to()
@@ -549,7 +528,7 @@ class TestSerializationAfterForward:
         pkt2.read_from(wire)
         assert pkt2.get_path_hash_size() == 3
         assert pkt2.get_path_hash_count() == 2
-        assert pkt2.get_path_hashes() == [b"\x11\x22\x33", b"\xAA\xBB\xCC"]
+        assert pkt2.get_path_hashes() == [b"\x11\x22\x33", b"\xaa\xbb\xcc"]
 
 
 # ===================================================================
@@ -572,7 +551,7 @@ class TestFloodChainLoopDetection:
         ]
         handlers = [_make_handler(loop_detect="strict", local_hash_bytes=h) for h in hashes]
 
-        pkt = _make_flood_packet(payload=b"\xFE\xED")
+        pkt = _make_flood_packet(payload=b"\xfe\xed")
         for i, h in enumerate(handlers):
             result = h.flood_forward(pkt)
             assert result is not None, f"repeater {i} unexpectedly dropped packet"
@@ -582,7 +561,7 @@ class TestFloodChainLoopDetection:
                 path_bytes=bytes(result.path),
                 hash_size=1,
                 hash_count=result.get_path_hash_count(),
-                payload=b"\xFE\xED" + bytes([i + 1]),
+                payload=b"\xfe\xed" + bytes([i + 1]),
             )
 
         assert pkt.get_path_hash_count() == 3
@@ -607,7 +586,8 @@ class TestFloodChainLoopDetection:
 
         # B forwards (new payload to avoid dedup)
         pkt_b = _make_flood_packet(
-            bytes(pkt.path), hash_size=1,
+            bytes(pkt.path),
+            hash_size=1,
             hash_count=pkt.get_path_hash_count(),
             payload=b"\x01\x02\x03\x04",
         )
@@ -616,7 +596,8 @@ class TestFloodChainLoopDetection:
 
         # C forwards
         pkt_c = _make_flood_packet(
-            bytes(pkt_b.path), hash_size=1,
+            bytes(pkt_b.path),
+            hash_size=1,
             hash_count=pkt_b.get_path_hash_count(),
             payload=b"\x01\x02\x03\x04\x05",
         )
@@ -625,7 +606,8 @@ class TestFloodChainLoopDetection:
 
         # Back to A — 0x11 is already in path → strict blocks it
         pkt_a2 = _make_flood_packet(
-            bytes(pkt_c.path), hash_size=1,
+            bytes(pkt_c.path),
+            hash_size=1,
             hash_count=pkt_c.get_path_hash_count(),
             payload=b"\x01\x02\x03\x04\x05\x06",
         )
@@ -640,11 +622,11 @@ class TestFloodChainLoopDetection:
         """
         h = _make_handler(loop_detect="off", local_hash_bytes=bytes([0x11, 0x00, 0x00]))
 
-        pkt = _make_flood_packet(payload=b"\xAA\xBB")
+        pkt = _make_flood_packet(payload=b"\xaa\xbb")
         assert h.flood_forward(pkt) is not None
 
         # Same payload comes back
-        pkt2 = _make_flood_packet(payload=b"\xAA\xBB")
+        pkt2 = _make_flood_packet(payload=b"\xaa\xbb")
         result = h.flood_forward(pkt2)
         assert result is None
         assert pkt2.drop_reason == "Duplicate"
@@ -664,7 +646,8 @@ class TestFloodChainLoopDetection:
 
         # B forwards
         pkt_b = _make_flood_packet(
-            bytes(pkt.path), hash_size=2,
+            bytes(pkt.path),
+            hash_size=2,
             hash_count=pkt.get_path_hash_count(),
             payload=b"\x01\x02\x03",
         )
@@ -673,7 +656,8 @@ class TestFloodChainLoopDetection:
 
         # Back to A — byte 0xAA is in path → strict detects it
         pkt_a2 = _make_flood_packet(
-            bytes(pkt_b.path), hash_size=2,
+            bytes(pkt_b.path),
+            hash_size=2,
             hash_count=pkt_b.get_path_hash_count(),
             payload=b"\x01\x02\x03\x04",
         )

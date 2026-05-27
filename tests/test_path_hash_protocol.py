@@ -11,11 +11,12 @@ rather than mocking the protocol layer. Covers:
   - PacketBuilder.create_trace payload structure + TraceHandler parsing
   - Max-hop boundary enforcement per hash size
 """
+
 import struct
 from unittest.mock import MagicMock, patch
 
 import pytest
-
+from pymc_core.node.handlers.trace import TraceHandler
 from pymc_core.protocol import Packet, PacketBuilder, PathUtils
 from pymc_core.protocol.constants import (
     MAX_PATH_SIZE,
@@ -25,8 +26,6 @@ from pymc_core.protocol.constants import (
     ROUTE_TYPE_DIRECT,
     ROUTE_TYPE_FLOOD,
 )
-from pymc_core.node.handlers.trace import TraceHandler
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -35,8 +34,9 @@ from pymc_core.node.handlers.trace import TraceHandler
 LOCAL_HASH_BYTES = bytes([0xAB, 0xCD, 0xEF])
 
 
-def _make_flood_packet(path_bytes: bytes, hash_size: int, hash_count: int,
-                        payload: bytes = b"\x01\x02\x03\x04") -> Packet:
+def _make_flood_packet(
+    path_bytes: bytes, hash_size: int, hash_count: int, payload: bytes = b"\x01\x02\x03\x04"
+) -> Packet:
     """Create a real flood Packet with the given multi-byte path encoding."""
     pkt = Packet()
     pkt.header = ROUTE_TYPE_FLOOD
@@ -47,8 +47,9 @@ def _make_flood_packet(path_bytes: bytes, hash_size: int, hash_count: int,
     return pkt
 
 
-def _make_direct_packet(path_bytes: bytes, hash_size: int, hash_count: int,
-                         payload: bytes = b"\x01\x02\x03\x04") -> Packet:
+def _make_direct_packet(
+    path_bytes: bytes, hash_size: int, hash_count: int, payload: bytes = b"\x01\x02\x03\x04"
+) -> Packet:
     """Create a real direct-routed Packet."""
     pkt = Packet()
     pkt.header = ROUTE_TYPE_DIRECT
@@ -87,8 +88,12 @@ def _make_handler(path_hash_mode=0, local_hash_bytes=None):
     }
     dispatcher = MagicMock()
     dispatcher.radio = MagicMock(
-        spreading_factor=8, bandwidth=125000, coding_rate=8,
-        preamble_length=17, frequency=915000000, tx_power=14,
+        spreading_factor=8,
+        bandwidth=125000,
+        coding_rate=8,
+        preamble_length=17,
+        frequency=915000000,
+        tx_power=14,
     )
     dispatcher.local_identity = MagicMock()
     with (
@@ -96,6 +101,7 @@ def _make_handler(path_hash_mode=0, local_hash_bytes=None):
         patch("repeater.engine.RepeaterHandler._start_background_tasks"),
     ):
         from repeater.engine import RepeaterHandler
+
         h = RepeaterHandler(config, dispatcher, lhb[0], local_hash_bytes=lhb)
     return h
 
@@ -114,11 +120,20 @@ class TestPathUtilsRoundTrip:
         assert PathUtils.get_path_hash_size(encoded) == hash_size
         assert PathUtils.get_path_hash_count(encoded) == 0
 
-    @pytest.mark.parametrize("hash_size,count", [
-        (1, 1), (1, 10), (1, 63),
-        (2, 1), (2, 15), (2, 32),
-        (3, 1), (3, 10), (3, 21),
-    ])
+    @pytest.mark.parametrize(
+        "hash_size,count",
+        [
+            (1, 1),
+            (1, 10),
+            (1, 63),
+            (2, 1),
+            (2, 15),
+            (2, 32),
+            (3, 1),
+            (3, 10),
+            (3, 21),
+        ],
+    )
     def test_encode_decode_round_trip(self, hash_size, count):
         encoded = PathUtils.encode_path_len(hash_size, count)
         assert PathUtils.get_path_hash_size(encoded) == hash_size
@@ -186,16 +201,16 @@ class TestPacketMultiBytePath:
     """Verify Packet write_to/read_from preserves multi-byte path encoding."""
 
     def test_1_byte_path_round_trip(self):
-        pkt = _make_flood_packet(b"\xAA\xBB\xCC", hash_size=1, hash_count=3)
+        pkt = _make_flood_packet(b"\xaa\xbb\xcc", hash_size=1, hash_count=3)
         wire = pkt.write_to()
         pkt2 = Packet()
         pkt2.read_from(wire)
         assert pkt2.get_path_hash_size() == 1
         assert pkt2.get_path_hash_count() == 3
-        assert bytes(pkt2.path) == b"\xAA\xBB\xCC"
+        assert bytes(pkt2.path) == b"\xaa\xbb\xcc"
 
     def test_2_byte_path_round_trip(self):
-        path = b"\xAA\xBB\xCC\xDD"  # 2 hops of 2 bytes
+        path = b"\xaa\xbb\xcc\xdd"  # 2 hops of 2 bytes
         pkt = _make_flood_packet(path, hash_size=2, hash_count=2)
         wire = pkt.write_to()
         pkt2 = Packet()
@@ -205,7 +220,7 @@ class TestPacketMultiBytePath:
         assert bytes(pkt2.path) == path
 
     def test_3_byte_path_round_trip(self):
-        path = b"\xAA\xBB\xCC\xDD\xEE\xFF"  # 2 hops of 3 bytes
+        path = b"\xaa\xbb\xcc\xdd\xee\xff"  # 2 hops of 3 bytes
         pkt = _make_flood_packet(path, hash_size=3, hash_count=2)
         wire = pkt.write_to()
         pkt2 = Packet()
@@ -225,7 +240,7 @@ class TestPacketMultiBytePath:
 
     def test_payload_preserved_after_multibyte_path(self):
         """Payload bytes after a multi-byte path are correctly sliced."""
-        payload = b"\xDE\xAD\xBE\xEF"
+        payload = b"\xde\xad\xbe\xef"
         path = b"\x11\x22\x33\x44\x55\x66"
         pkt = _make_flood_packet(path, hash_size=3, hash_count=2, payload=payload)
         wire = pkt.write_to()
@@ -248,28 +263,26 @@ class TestPacketGetPathHashes:
     """Verify Packet.get_path_hashes splits path into per-hop byte entries."""
 
     def test_1_byte_hashes(self):
-        pkt = _make_flood_packet(b"\xAA\xBB\xCC", hash_size=1, hash_count=3)
+        pkt = _make_flood_packet(b"\xaa\xbb\xcc", hash_size=1, hash_count=3)
         hashes = pkt.get_path_hashes()
-        assert hashes == [b"\xAA", b"\xBB", b"\xCC"]
+        assert hashes == [b"\xaa", b"\xbb", b"\xcc"]
 
     def test_2_byte_hashes(self):
-        pkt = _make_flood_packet(b"\xAA\xBB\xCC\xDD", hash_size=2, hash_count=2)
+        pkt = _make_flood_packet(b"\xaa\xbb\xcc\xdd", hash_size=2, hash_count=2)
         hashes = pkt.get_path_hashes()
-        assert hashes == [b"\xAA\xBB", b"\xCC\xDD"]
+        assert hashes == [b"\xaa\xbb", b"\xcc\xdd"]
 
     def test_3_byte_hashes(self):
-        pkt = _make_flood_packet(
-            b"\xAA\xBB\xCC\xDD\xEE\xFF", hash_size=3, hash_count=2
-        )
+        pkt = _make_flood_packet(b"\xaa\xbb\xcc\xdd\xee\xff", hash_size=3, hash_count=2)
         hashes = pkt.get_path_hashes()
-        assert hashes == [b"\xAA\xBB\xCC", b"\xDD\xEE\xFF"]
+        assert hashes == [b"\xaa\xbb\xcc", b"\xdd\xee\xff"]
 
     def test_empty_path(self):
         pkt = _make_flood_packet(b"", hash_size=2, hash_count=0)
         assert pkt.get_path_hashes() == []
 
     def test_hashes_hex_output(self):
-        pkt = _make_flood_packet(b"\x0A\x0B\x0C\x0D", hash_size=2, hash_count=2)
+        pkt = _make_flood_packet(b"\x0a\x0b\x0c\x0d", hash_size=2, hash_count=2)
         hex_hashes = pkt.get_path_hashes_hex()
         assert hex_hashes == ["0A0B", "0C0D"]
 
@@ -289,7 +302,7 @@ class TestPacketApplyPathHashMode:
 
     def test_apply_mode_skips_nonzero_hop_count(self):
         """Mode should not be re-applied if path already has hops."""
-        pkt = _make_flood_packet(b"\xAA\xBB", hash_size=2, hash_count=1)
+        pkt = _make_flood_packet(b"\xaa\xbb", hash_size=2, hash_count=1)
         original_path_len = pkt.path_len
         pkt.apply_path_hash_mode(0)  # try to override to 1-byte
         assert pkt.path_len == original_path_len  # unchanged
@@ -314,7 +327,7 @@ class TestPacketSetPath:
     def test_set_path_with_encoded_len(self):
         pkt = Packet()
         pkt.header = ROUTE_TYPE_FLOOD
-        path = b"\xAA\xBB\xCC\xDD"
+        path = b"\xaa\xbb\xcc\xdd"
         encoded = PathUtils.encode_path_len(2, 2)
         pkt.set_path(path, path_len_encoded=encoded)
         assert pkt.get_path_hash_size() == 2
@@ -325,7 +338,7 @@ class TestPacketSetPath:
         """Without explicit path_len_encoded, defaults to 1-byte hash_size."""
         pkt = Packet()
         pkt.header = ROUTE_TYPE_FLOOD
-        pkt.set_path(b"\xAA\xBB\xCC")
+        pkt.set_path(b"\xaa\xbb\xcc")
         assert pkt.get_path_hash_size() == 1
         assert pkt.get_path_hash_count() == 3
 
@@ -347,7 +360,7 @@ class TestFloodForwardMultiByte:
         assert result.get_path_hash_size() == 1
         hashes = result.get_path_hashes()
         assert hashes[0] == b"\x11"
-        assert hashes[1] == b"\xAB"  # first byte of local_hash_bytes
+        assert hashes[1] == b"\xab"  # first byte of local_hash_bytes
 
     def test_2_byte_mode_appends_two_bytes(self):
         h = _make_handler(path_hash_mode=1, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
@@ -358,7 +371,7 @@ class TestFloodForwardMultiByte:
         assert result.get_path_hash_size() == 2
         hashes = result.get_path_hashes()
         assert hashes[0] == b"\x11\x22"
-        assert hashes[1] == b"\xAB\xCD"
+        assert hashes[1] == b"\xab\xcd"
 
     def test_3_byte_mode_appends_three_bytes(self):
         h = _make_handler(path_hash_mode=2, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
@@ -369,7 +382,7 @@ class TestFloodForwardMultiByte:
         assert result.get_path_hash_size() == 3
         hashes = result.get_path_hashes()
         assert hashes[0] == b"\x11\x22\x33"
-        assert hashes[1] == b"\xAB\xCD\xEF"
+        assert hashes[1] == b"\xab\xcd\xef"
 
     def test_empty_path_gets_local_hash_appended(self):
         h = _make_handler(path_hash_mode=1, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
@@ -378,7 +391,7 @@ class TestFloodForwardMultiByte:
         assert result is not None
         assert result.get_path_hash_count() == 1
         hashes = result.get_path_hashes()
-        assert hashes[0] == b"\xAB\xCD"
+        assert hashes[0] == b"\xab\xcd"
 
     def test_path_len_re_encoded_after_forward(self):
         """After appending, path_len byte should encode (hash_size, count+1)."""
@@ -400,7 +413,7 @@ class TestFloodForwardMultiByte:
         pkt2.read_from(wire)
         assert pkt2.get_path_hash_size() == 2
         assert pkt2.get_path_hash_count() == 2
-        assert pkt2.get_path_hashes() == [b"\x11\x22", b"\xAB\xCD"]
+        assert pkt2.get_path_hashes() == [b"\x11\x22", b"\xab\xcd"]
 
     def test_flood_rejects_at_max_hops_2_byte(self):
         """At 32 hops (2-byte mode), flood_forward should drop the packet."""
@@ -449,7 +462,7 @@ class TestDirectForwardMultiByte:
     def test_1_byte_match_strips_first_hop(self):
         h = _make_handler(path_hash_mode=0, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         # Path: [0xAB, 0x11] — first hop matches local_hash_bytes[0]
-        pkt = _make_direct_packet(b"\xAB\x11", hash_size=1, hash_count=2)
+        pkt = _make_direct_packet(b"\xab\x11", hash_size=1, hash_count=2)
         result = h.direct_forward(pkt)
         assert result is not None
         assert result.get_path_hash_count() == 1
@@ -459,7 +472,7 @@ class TestDirectForwardMultiByte:
     def test_2_byte_match_strips_first_hop(self):
         h = _make_handler(path_hash_mode=1, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         # Path: [0xAB,0xCD, 0x11,0x22] — first 2-byte hop matches local_hash_bytes[:2]
-        pkt = _make_direct_packet(b"\xAB\xCD\x11\x22", hash_size=2, hash_count=2)
+        pkt = _make_direct_packet(b"\xab\xcd\x11\x22", hash_size=2, hash_count=2)
         result = h.direct_forward(pkt)
         assert result is not None
         assert result.get_path_hash_count() == 1
@@ -468,9 +481,7 @@ class TestDirectForwardMultiByte:
 
     def test_3_byte_match_strips_first_hop(self):
         h = _make_handler(path_hash_mode=2, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_direct_packet(
-            b"\xAB\xCD\xEF\x11\x22\x33", hash_size=3, hash_count=2
-        )
+        pkt = _make_direct_packet(b"\xab\xcd\xef\x11\x22\x33", hash_size=3, hash_count=2)
         result = h.direct_forward(pkt)
         assert result is not None
         assert result.get_path_hash_count() == 1
@@ -480,14 +491,14 @@ class TestDirectForwardMultiByte:
     def test_2_byte_mismatch_rejects(self):
         h = _make_handler(path_hash_mode=1, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         # Path: [0xFF,0xEE, ...] — first 2-byte hop doesn't match
-        pkt = _make_direct_packet(b"\xFF\xEE\x11\x22", hash_size=2, hash_count=2)
+        pkt = _make_direct_packet(b"\xff\xee\x11\x22", hash_size=2, hash_count=2)
         result = h.direct_forward(pkt)
         assert result is None
         assert "not for us" in (pkt.drop_reason or "")
 
     def test_path_len_re_encoded_after_strip(self):
         h = _make_handler(path_hash_mode=1, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_direct_packet(b"\xAB\xCD\x11\x22\x33\x44", hash_size=2, hash_count=3)
+        pkt = _make_direct_packet(b"\xab\xcd\x11\x22\x33\x44", hash_size=2, hash_count=3)
         result = h.direct_forward(pkt)
         assert result is not None
         expected_path_len = PathUtils.encode_path_len(2, 2)
@@ -496,7 +507,7 @@ class TestDirectForwardMultiByte:
     def test_last_hop_strips_to_empty(self):
         """When only one hop remains and it matches, path becomes empty."""
         h = _make_handler(path_hash_mode=1, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_direct_packet(b"\xAB\xCD", hash_size=2, hash_count=1)
+        pkt = _make_direct_packet(b"\xab\xcd", hash_size=2, hash_count=1)
         result = h.direct_forward(pkt)
         assert result is not None
         assert result.get_path_hash_count() == 0
@@ -506,7 +517,7 @@ class TestDirectForwardMultiByte:
         """After stripping, the packet should serialize/deserialize cleanly."""
         h = _make_handler(path_hash_mode=2, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
         pkt = _make_direct_packet(
-            b"\xAB\xCD\xEF\x11\x22\x33\x44\x55\x66", hash_size=3, hash_count=3
+            b"\xab\xcd\xef\x11\x22\x33\x44\x55\x66", hash_size=3, hash_count=3
         )
         result = h.direct_forward(pkt)
         assert result is not None
@@ -527,7 +538,7 @@ class TestDirectForwardMultiByte:
     def test_path_too_short_for_hash_size(self):
         """If path has fewer bytes than hash_size, reject."""
         h = _make_handler(path_hash_mode=1, local_hash_bytes=bytes([0xAB, 0xCD, 0xEF]))
-        pkt = _make_direct_packet(b"\xAB", hash_size=2, hash_count=1)
+        pkt = _make_direct_packet(b"\xab", hash_size=2, hash_count=1)
         # path has 1 byte but hash_size is 2
         result = h.direct_forward(pkt)
         assert result is None
@@ -546,7 +557,6 @@ class TestMultiHopForwardingChain:
         Simulate: node_A floods → repeater_1 forwards → repeater_2 forwards
         Then the return direct packet strips hops in reverse order.
         """
-        node_a_hash = bytes([0x11, 0x22, 0x33])
         rep1_hash = bytes([0xAA, 0xBB, 0xCC])
         rep2_hash = bytes([0xDD, 0xEE, 0xFF])
 
@@ -576,8 +586,7 @@ class TestMultiHopForwardingChain:
         # The path should be [rep1, rep2] — direct packet addressed to rep1 first
         # (Direct packets strip from the front)
         direct_pkt = _make_direct_packet(
-            bytes(pkt_rx.path), hash_size=2, hash_count=2,
-            payload=b"\xFE\xED"
+            bytes(pkt_rx.path), hash_size=2, hash_count=2, payload=b"\xfe\xed"
         )
 
         # repeater_1 strips its hop
@@ -616,9 +625,7 @@ class TestTracePacketStructure:
     def test_create_trace_with_path_bytes(self):
         """Trace path goes into payload, not routing path."""
         path_bytes = [0xAA, 0xBB, 0xCC, 0xDD]
-        pkt = PacketBuilder.create_trace(
-            tag=1, auth_code=2, flags=0, path=path_bytes
-        )
+        pkt = PacketBuilder.create_trace(tag=1, auth_code=2, flags=0, path=path_bytes)
         payload = pkt.get_payload()
         assert len(payload) == 9 + 4
         # Routing path stays empty
@@ -699,9 +706,7 @@ class TestTracePayloadParsing:
         """Create a trace with PacketBuilder, serialize, deserialize, then parse."""
         th = self._make_trace_handler()
         trace_path = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66]
-        pkt = PacketBuilder.create_trace(
-            tag=100, auth_code=200, flags=0, path=trace_path
-        )
+        pkt = PacketBuilder.create_trace(tag=100, auth_code=200, flags=0, path=trace_path)
         wire = pkt.write_to()
         pkt2 = Packet()
         pkt2.read_from(wire)
@@ -725,9 +730,9 @@ class TestTraceHelperMultibyte:
     """TraceHelper._should_forward_trace with 2-byte TRACE payload hashes."""
 
     def test_should_forward_when_next_hop_matches_pubkey_prefix(self):
-        from repeater.handler_helpers.trace import TraceHelper
-
         from pymc_core.protocol import LocalIdentity
+
+        from repeater.handler_helpers.trace import TraceHelper
 
         identity = LocalIdentity()
         pub = bytes(identity.get_public_key())
@@ -747,9 +752,9 @@ class TestTraceHelperMultibyte:
         assert th._should_forward_trace(pkt, trace_bytes, flags, hash_width)
 
     def test_should_not_forward_when_next_hop_mismatch(self):
-        from repeater.handler_helpers.trace import TraceHelper
-
         from pymc_core.protocol import LocalIdentity
+
+        from repeater.handler_helpers.trace import TraceHelper
 
         identity = LocalIdentity()
         pub = bytes(identity.get_public_key())
@@ -782,22 +787,18 @@ class TestWireLevelEncoding:
         ROUTE_TYPE_FLOOD (no transport codes):
         [header(1)] [path_len(1)] [path(N)] [payload(M)]
         """
-        pkt = _make_flood_packet(
-            b"\xAA\xBB\xCC\xDD", hash_size=2, hash_count=2,
-            payload=b"\xFE"
-        )
+        pkt = _make_flood_packet(b"\xaa\xbb\xcc\xdd", hash_size=2, hash_count=2, payload=b"\xfe")
         wire = pkt.write_to()
         assert wire[0] == ROUTE_TYPE_FLOOD  # header
         path_len = wire[1]
         assert PathUtils.get_path_hash_size(path_len) == 2
         assert PathUtils.get_path_hash_count(path_len) == 2
-        assert wire[2:6] == b"\xAA\xBB\xCC\xDD"  # path bytes
-        assert wire[6:] == b"\xFE"  # payload
+        assert wire[2:6] == b"\xaa\xbb\xcc\xdd"  # path bytes
+        assert wire[6:] == b"\xfe"  # payload
 
     def test_3_byte_mode_wire_format(self):
         pkt = _make_flood_packet(
-            b"\x11\x22\x33\x44\x55\x66", hash_size=3, hash_count=2,
-            payload=b"\xAA"
+            b"\x11\x22\x33\x44\x55\x66", hash_size=3, hash_count=2, payload=b"\xaa"
         )
         wire = pkt.write_to()
         assert wire[0] == ROUTE_TYPE_FLOOD
@@ -805,11 +806,11 @@ class TestWireLevelEncoding:
         assert PathUtils.get_path_hash_size(path_len) == 3
         assert PathUtils.get_path_hash_count(path_len) == 2
         assert wire[2:8] == b"\x11\x22\x33\x44\x55\x66"
-        assert wire[8:] == b"\xAA"
+        assert wire[8:] == b"\xaa"
 
     def test_1_byte_mode_backward_compat_wire(self):
         """1-byte mode: path_len byte on wire == hop count (legacy format)."""
-        pkt = _make_flood_packet(b"\xAA\xBB", hash_size=1, hash_count=2)
+        pkt = _make_flood_packet(b"\xaa\xbb", hash_size=1, hash_count=2)
         wire = pkt.write_to()
         assert wire[1] == 2  # path_len == hop_count for 1-byte mode
 
@@ -817,10 +818,10 @@ class TestWireLevelEncoding:
         """Manually construct wire bytes and verify read_from parses correctly."""
         # header=ROUTE_TYPE_FLOOD, path_len=encode(2, 2), path=4 bytes, payload=2 bytes
         path_len = PathUtils.encode_path_len(2, 2)
-        wire = bytes([ROUTE_TYPE_FLOOD, path_len]) + b"\xAA\xBB\xCC\xDD" + b"\xFE\xED"
+        wire = bytes([ROUTE_TYPE_FLOOD, path_len]) + b"\xaa\xbb\xcc\xdd" + b"\xfe\xed"
         pkt = Packet()
         pkt.read_from(wire)
         assert pkt.get_path_hash_size() == 2
         assert pkt.get_path_hash_count() == 2
-        assert pkt.get_path_hashes() == [b"\xAA\xBB", b"\xCC\xDD"]
-        assert pkt.get_payload() == b"\xFE\xED"
+        assert pkt.get_path_hashes() == [b"\xaa\xbb", b"\xcc\xdd"]
+        assert pkt.get_payload() == b"\xfe\xed"

@@ -26,30 +26,36 @@ from .registry import SensorRegistry
 
 # INA219 register addresses
 _REG_CONFIG = 0x00
-_REG_SHUNT  = 0x01
-_REG_BUS    = 0x02
-_REG_POWER  = 0x03
+_REG_SHUNT = 0x01
+_REG_BUS = 0x02
+_REG_POWER = 0x03
 _REG_CURRENT = 0x04
-_REG_CAL    = 0x05
+_REG_CAL = 0x05
 
 # 32V range, ±320mV gain, 128-sample averaging, continuous shunt+bus
 _CONFIG_VALUE = 0x3FFF
 
 # Waveshare UPS HAT (D) calibration — 0.01Ω shunt (per Waveshare sample code)
 # current_lsb ≈ 0.1524 mA/LSB, power_lsb = current_lsb × 20
-_CAL_VALUE   = 26868
-_CURRENT_LSB = 0.0001524   # A per LSB
-_POWER_LSB   = _CURRENT_LSB * 20.0  # W per LSB
+_CAL_VALUE = 26868
+_CURRENT_LSB = 0.0001524  # A per LSB
+_POWER_LSB = _CURRENT_LSB * 20.0  # W per LSB
 
 
 def _voltage_to_percent(v: float) -> int:
     """Piecewise linear SoC estimate for a single 21700 Li-ion cell (3.0–4.2 V)."""
-    if v >= 4.20: return 100
-    if v >= 4.00: return int(85 + (v - 4.00) / 0.20 * 15)
-    if v >= 3.80: return int(60 + (v - 3.80) / 0.20 * 25)
-    if v >= 3.70: return int(40 + (v - 3.70) / 0.10 * 20)
-    if v >= 3.50: return int(15 + (v - 3.50) / 0.20 * 25)
-    if v >= 3.00: return int(       (v - 3.00) / 0.50 * 15)
+    if v >= 4.20:
+        return 100
+    if v >= 4.00:
+        return int(85 + (v - 4.00) / 0.20 * 15)
+    if v >= 3.80:
+        return int(60 + (v - 3.80) / 0.20 * 25)
+    if v >= 3.70:
+        return int(40 + (v - 3.70) / 0.10 * 20)
+    if v >= 3.50:
+        return int(15 + (v - 3.50) / 0.20 * 25)
+    if v >= 3.00:
+        return int((v - 3.00) / 0.50 * 15)
     return 0
 
 
@@ -61,7 +67,7 @@ class WaveshareUpsDSensor(SensorBase):
         super().__init__(name=name, config=config, log=log)
 
         self.i2c_address = int(self.settings.get("i2c_address", 0x43))
-        self.bus_number  = int(self.settings.get("bus_number", 1))
+        self.bus_number = int(self.settings.get("bus_number", 1))
 
         self.available = False
 
@@ -70,6 +76,7 @@ class WaveshareUpsDSensor(SensorBase):
 
         try:
             import smbus2  # type: ignore[import-not-found]
+
             self._smbus2 = smbus2
 
             bus = smbus2.SMBus(self.bus_number)
@@ -96,9 +103,7 @@ class WaveshareUpsDSensor(SensorBase):
             )
 
     def _write(self, bus, reg: int, val: int) -> None:
-        bus.write_i2c_block_data(
-            self.i2c_address, reg, [(val >> 8) & 0xFF, val & 0xFF]
-        )
+        bus.write_i2c_block_data(self.i2c_address, reg, [(val >> 8) & 0xFF, val & 0xFF])
 
     def _read_u(self, bus, reg: int) -> int:
         d = bus.read_i2c_block_data(self.i2c_address, reg, 2)
@@ -119,10 +124,10 @@ class WaveshareUpsDSensor(SensorBase):
                 # Re-apply calibration in case of external reset
                 self._write(bus, _REG_CAL, _CAL_VALUE)
 
-                bus_v     = (self._read_u(bus, _REG_BUS) >> 3) * 4 / 1000.0
-                shunt_mv  = self._read_s(bus, _REG_SHUNT) * 0.01
+                bus_v = (self._read_u(bus, _REG_BUS) >> 3) * 4 / 1000.0
+                shunt_mv = self._read_s(bus, _REG_SHUNT) * 0.01
                 current_ma = self._read_s(bus, _REG_CURRENT) * _CURRENT_LSB * 1000.0
-                power_mw  = self._read_u(bus, _REG_POWER) * _POWER_LSB * 1000.0
+                power_mw = self._read_u(bus, _REG_POWER) * _POWER_LSB * 1000.0
             finally:
                 bus.close()
 
@@ -137,12 +142,12 @@ class WaveshareUpsDSensor(SensorBase):
                 state = "idle"
 
             return {
-                "bus_voltage_v":    round(bus_v, 3),
+                "bus_voltage_v": round(bus_v, 3),
                 "shunt_voltage_mv": round(shunt_mv, 2),
-                "current_ma":       round(current_ma, 1),
-                "power_mw":         round(power_mw, 1),
-                "battery_percent":  pct,
-                "charge_state":     state,
+                "current_ma": round(current_ma, 1),
+                "power_mw": round(power_mw, 1),
+                "battery_percent": pct,
+                "charge_state": state,
             }
         except Exception as exc:
             raise RuntimeError(f"Waveshare UPS HAT (D) read failed: {exc}") from exc

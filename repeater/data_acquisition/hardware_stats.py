@@ -18,11 +18,10 @@ logger = logging.getLogger("HardwareStats")
 
 
 class HardwareStatsCollector:
-    
     def __init__(self):
 
         self.start_time = time.time()
-    
+
     def get_stats(self):
 
         if not PSUTIL_AVAILABLE:
@@ -32,13 +31,12 @@ class HardwareStatsCollector:
         try:
             # Get current timestamp
             now = time.time()
-            uptime = now - self.start_time
-            
+
             # CPU stats
             cpu_percent = psutil.cpu_percent(interval=0.1)
             cpu_count = psutil.cpu_count()
             cpu_freq = psutil.cpu_freq()
-            
+
             # Memory stats
             memory = psutil.virtual_memory()
 
@@ -47,7 +45,7 @@ class HardwareStatsCollector:
 
             # Network stats (total across all interfaces)
             net_io = psutil.net_io_counters()
-            
+
             # Load average (Unix only)
             load_avg = None
             try:
@@ -55,11 +53,11 @@ class HardwareStatsCollector:
             except (AttributeError, OSError):
                 # Not available on all systems - use zeros
                 load_avg = (0.0, 0.0, 0.0)
-            
+
             # System boot time
             boot_time = psutil.boot_time()
             system_uptime = now - boot_time
-            
+
             # Temperature (if available)
             temperatures = {}
             try:
@@ -71,7 +69,7 @@ class HardwareStatsCollector:
             except (AttributeError, OSError):
                 # Temperature sensors not available
                 pass
-            
+
             # Format data structure to match Vue component expectations
             stats = {
                 "cpu": {
@@ -104,7 +102,7 @@ class HardwareStatsCollector:
             # Add temperatures if available
             if temperatures:
                 stats["temperatures"] = temperatures
-            
+
             return stats
 
         except Exception as e:

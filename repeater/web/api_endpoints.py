@@ -1,9 +1,9 @@
 import json
 import logging
 import os
+import secrets
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Callable, Optional
 
 import cherrypy
@@ -15,7 +15,7 @@ from repeater.companion.identity_resolve import (
     find_companion_index,
     heal_companion_empty_names,
 )
-from repeater.config import resolve_storage_dir, update_unscoped_flood_policy
+from repeater.config import resolve_storage_dir
 from repeater.service_utils import get_buildroot_image_info
 
 from .auth.middleware import require_auth
@@ -164,7 +164,6 @@ logger = logging.getLogger("HTTPServer")
 
 
 class APIEndpoints:
-
     def __init__(
         self,
         stats_getter: Optional[Callable] = None,
@@ -332,12 +331,14 @@ class APIEndpoints:
             import yaml
 
             config = self.config
+            config_path = getattr(self, "_config_path", None)
             try:
-                with open(self._config_path, "r") as f:
-                    config = yaml.safe_load(f) or {}
-            except Exception:
+                if config_path:
+                    with open(config_path, "r") as f:
+                        config = yaml.safe_load(f) or {}
+            except Exception as exc:
                 # Fall back to in-memory config if file cannot be read.
-                pass
+                logger.debug(f"needs_setup could not read persisted config {config_path}: {exc}")
 
             needs_setup, reasons = self._setup_status_from_config(config)
 
@@ -455,7 +456,12 @@ class APIEndpoints:
                 # Fallback for environments where pyserial is unavailable.
                 import glob
 
-                for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*", "/dev/ttyS*", "/dev/serial/by-id/*"):
+                for pattern in (
+                    "/dev/ttyACM*",
+                    "/dev/ttyUSB*",
+                    "/dev/ttyS*",
+                    "/dev/serial/by-id/*",
+                ):
                     for dev in glob.glob(pattern):
                         devices.append({"device": str(dev), "description": str(dev)})
 
@@ -535,7 +541,10 @@ class APIEndpoints:
                 hardware_configs = hardware_data.get("hardware", {})
                 hw_config = hardware_configs.get(hardware_key, {})
                 if not hw_config:
-                    return {"success": False, "error": f"Hardware configuration not found: {hardware_key}"}
+                    return {
+                        "success": False,
+                        "error": f"Hardware configuration not found: {hardware_key}",
+                    }
             else:
                 hw_config = {}
 
@@ -581,7 +590,9 @@ class APIEndpoints:
                 kiss_port = (data.get("kiss_port") or "").strip() or "/dev/ttyUSB0"
                 kiss_baud = int(data.get("kiss_baud_rate", data.get("kiss_baud", 115200)))
                 config_yaml["kiss"] = {"port": kiss_port, "baud_rate": kiss_baud}
-                config_yaml["radio"]["tx_power"] = tx_power_preset if tx_power_preset is not None else 14
+                config_yaml["radio"]["tx_power"] = (
+                    tx_power_preset if tx_power_preset is not None else 14
+                )
                 if "preamble_length" not in config_yaml["radio"]:
                     config_yaml["radio"]["preamble_length"] = 17
             elif hardware_key == "pymc_usb":
@@ -638,7 +649,9 @@ class APIEndpoints:
                 else:
                     config_yaml["radio_type"] = "sx1262"
 
-                ch341_cfg = hw_config.get("ch341") if isinstance(hw_config.get("ch341"), dict) else None
+                ch341_cfg = (
+                    hw_config.get("ch341") if isinstance(hw_config.get("ch341"), dict) else None
+                )
                 vid = (ch341_cfg or {}).get("vid", hw_config.get("vid"))
                 pid = (ch341_cfg or {}).get("pid", hw_config.get("pid"))
                 if vid is not None or pid is not None:
@@ -685,7 +698,9 @@ class APIEndpoints:
                 if "use_dio3_tcxo" in hw_config:
                     config_yaml["sx1262"]["use_dio3_tcxo"] = hw_config.get("use_dio3_tcxo", False)
                 if "dio3_tcxo_voltage" in hw_config:
-                    config_yaml["sx1262"]["dio3_tcxo_voltage"] = hw_config.get("dio3_tcxo_voltage", 1.8)
+                    config_yaml["sx1262"]["dio3_tcxo_voltage"] = hw_config.get(
+                        "dio3_tcxo_voltage", 1.8
+                    )
                 if "use_dio2_rf" in hw_config:
                     config_yaml["sx1262"]["use_dio2_rf"] = hw_config.get("use_dio2_rf", False)
                 if "is_waveshare" in hw_config:
@@ -699,7 +714,6 @@ class APIEndpoints:
             )
 
             # Trigger service restart after setup
-            import subprocess
             import threading
 
             def delayed_restart():
@@ -708,6 +722,7 @@ class APIEndpoints:
                 time.sleep(2)  # Give time for response to be sent
                 try:
                     from repeater.service_utils import restart_service
+
                     restart_service()
                 except Exception as e:
                     logger.error(f"Failed to restart service: {e}")
@@ -889,8 +904,7 @@ class APIEndpoints:
 
                         if snapshot_json != last_snapshot_json:
                             yield (
-                                f"data: {json.dumps({'type': 'snapshot', 'data': snapshot})}"
-                                "\n\n"
+                                f"data: {json.dumps({'type': 'snapshot', 'data': snapshot})}\n\n"
                             )
                             last_snapshot_json = snapshot_json
                             last_keepalive = time.time()
@@ -1067,7 +1081,7 @@ class APIEndpoints:
     @cherrypy.tools.json_in()
     def update_advert_rate_limit_config(self):
         """Update advert rate limiting configuration using ConfigManager.
-        
+
         POST /api/update_advert_rate_limit_config
         Body: {
             "rate_limit_enabled": true,
@@ -1090,16 +1104,16 @@ class APIEndpoints:
         }
         """
         self._set_cors_headers()
-        
+
         if cherrypy.request.method == "OPTIONS":
             return ""
-        
+
         try:
             self._require_post()
             data = cherrypy.request.json or {}
-            
+
             applied = []
-            
+
             # Ensure config sections exist
             if "repeater" not in self.config:
                 self.config["repeater"] = {}
@@ -1109,117 +1123,117 @@ class APIEndpoints:
                 self.config["repeater"]["advert_penalty_box"] = {}
             if "advert_adaptive" not in self.config["repeater"]:
                 self.config["repeater"]["advert_adaptive"] = {"thresholds": {}}
-            
+
             rate_cfg = self.config["repeater"]["advert_rate_limit"]
             penalty_cfg = self.config["repeater"]["advert_penalty_box"]
             adaptive_cfg = self.config["repeater"]["advert_adaptive"]
-            
+
             # Rate limit settings
             if "rate_limit_enabled" in data:
                 rate_cfg["enabled"] = bool(data["rate_limit_enabled"])
                 applied.append(f"rate_limit={'enabled' if rate_cfg['enabled'] else 'disabled'}")
-            
+
             if "bucket_capacity" in data:
                 cap = max(1, int(data["bucket_capacity"]))
                 rate_cfg["bucket_capacity"] = cap
                 applied.append(f"bucket_capacity={cap}")
-            
+
             if "refill_tokens" in data:
                 tokens = max(1, int(data["refill_tokens"]))
                 rate_cfg["refill_tokens"] = tokens
                 applied.append(f"refill_tokens={tokens}")
-            
+
             if "refill_interval_seconds" in data:
                 interval = max(60, int(data["refill_interval_seconds"]))
                 rate_cfg["refill_interval_seconds"] = interval
                 applied.append(f"refill_interval={interval}s")
-            
+
             if "min_interval_seconds" in data:
                 min_int = max(0, int(data["min_interval_seconds"]))
                 rate_cfg["min_interval_seconds"] = min_int
                 applied.append(f"min_interval={min_int}s")
-            
+
             # Penalty box settings
             if "penalty_enabled" in data:
                 penalty_cfg["enabled"] = bool(data["penalty_enabled"])
                 applied.append(f"penalty={'enabled' if penalty_cfg['enabled'] else 'disabled'}")
-            
+
             if "violation_threshold" in data:
                 thresh = max(1, int(data["violation_threshold"]))
                 penalty_cfg["violation_threshold"] = thresh
                 applied.append(f"violation_threshold={thresh}")
-            
+
             if "violation_decay_seconds" in data:
                 decay = max(60, int(data["violation_decay_seconds"]))
                 penalty_cfg["violation_decay_seconds"] = decay
                 applied.append(f"violation_decay={decay}s")
-            
+
             if "base_penalty_seconds" in data:
                 base = max(60, int(data["base_penalty_seconds"]))
                 penalty_cfg["base_penalty_seconds"] = base
                 applied.append(f"base_penalty={base}s")
-            
+
             if "penalty_multiplier" in data:
                 mult = max(1.0, float(data["penalty_multiplier"]))
                 penalty_cfg["penalty_multiplier"] = mult
                 applied.append(f"penalty_multiplier={mult}")
-            
+
             if "max_penalty_seconds" in data:
                 max_pen = max(60, int(data["max_penalty_seconds"]))
                 penalty_cfg["max_penalty_seconds"] = max_pen
                 applied.append(f"max_penalty={max_pen}s")
-            
+
             # Adaptive settings
             if "adaptive_enabled" in data:
                 adaptive_cfg["enabled"] = bool(data["adaptive_enabled"])
                 applied.append(f"adaptive={'enabled' if adaptive_cfg['enabled'] else 'disabled'}")
-            
+
             if "ewma_alpha" in data:
                 alpha = max(0.01, min(1.0, float(data["ewma_alpha"])))
                 adaptive_cfg["ewma_alpha"] = alpha
                 applied.append(f"ewma_alpha={alpha}")
-            
+
             if "hysteresis_seconds" in data:
                 hyst = max(0, int(data["hysteresis_seconds"]))
                 adaptive_cfg["hysteresis_seconds"] = hyst
                 applied.append(f"hysteresis={hyst}s")
-            
+
             # Adaptive thresholds
             if "thresholds" not in adaptive_cfg:
                 adaptive_cfg["thresholds"] = {}
-            
+
             if "quiet_max" in data:
                 adaptive_cfg["thresholds"]["quiet_max"] = float(data["quiet_max"])
                 applied.append(f"quiet_max={data['quiet_max']}")
-            
+
             if "normal_max" in data:
                 adaptive_cfg["thresholds"]["normal_max"] = float(data["normal_max"])
                 applied.append(f"normal_max={data['normal_max']}")
-            
+
             if "busy_max" in data:
                 adaptive_cfg["thresholds"]["busy_max"] = float(data["busy_max"])
                 applied.append(f"busy_max={data['busy_max']}")
-            
+
             if not applied:
                 return self._error("No valid settings provided")
-            
+
             # Save to config file and live update daemon
             result = self.config_manager.update_and_save(
-                updates={},
-                live_update=True,
-                live_update_sections=['repeater']
+                updates={}, live_update=True, live_update_sections=["repeater"]
             )
-            
+
             logger.info(f"Advert rate limit config updated: {', '.join(applied)}")
-            
-            return self._success({
-                "applied": applied,
-                "persisted": result.get("saved", False),
-                "live_update": result.get("live_updated", False),
-                "restart_required": False,
-                "message": "Advert rate limit settings applied immediately."
-            })
-            
+
+            return self._success(
+                {
+                    "applied": applied,
+                    "persisted": result.get("saved", False),
+                    "live_update": result.get("live_updated", False),
+                    "restart_required": False,
+                    "message": "Advert rate limit settings applied immediately.",
+                }
+            )
+
         except cherrypy.HTTPError:
             raise
         except Exception as e:
@@ -1295,27 +1309,31 @@ class APIEndpoints:
             try:
                 storage = self._get_storage()
                 handler = getattr(storage, "mqtt_handler", None)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(f"mqtt_status could not access mqtt_handler: {exc}")
 
             connected_brokers = []
             if handler:
                 for conn in getattr(handler, "connections", []):
-                    connected_brokers.append({
-                        "enabled": conn.enabled,
-                        "name": conn.broker.get("name", ""),
-                        "host": conn.broker.get("host", ""),
-                        "status": {
-                            "connected": conn.is_connected(),
-                            "reconnecting": conn.has_pending_reconnect(),
-                        },
-                        "format": conn.format
-                    })
+                    connected_brokers.append(
+                        {
+                            "enabled": conn.enabled,
+                            "name": conn.broker.get("name", ""),
+                            "host": conn.broker.get("host", ""),
+                            "status": {
+                                "connected": conn.is_connected(),
+                                "reconnecting": conn.has_pending_reconnect(),
+                            },
+                            "format": conn.format,
+                        }
+                    )
 
-            return self._success({
-                "handler_active": handler is not None,
-                "brokers": connected_brokers,
-            })
+            return self._success(
+                {
+                    "handler_active": handler is not None,
+                    "brokers": connected_brokers,
+                }
+            )
         except Exception as e:
             logger.error(f"Error getting MQTT status: {e}")
             return self._error(str(e))
@@ -1388,7 +1406,7 @@ class APIEndpoints:
             "email": "user@example.com",
             "brokers": [
             {
-            
+
             }]
         }
         """
@@ -1433,28 +1451,32 @@ class APIEndpoints:
 
                     for field in ("name", "host", "port", "format"):
                         if not b.get(field, ""):
-                            return self._error(f"Broker at index {i} missing required field: {field}")
-                    
+                            return self._error(
+                                f"Broker at index {i} missing required field: {field}"
+                            )
+
                     try:
                         port = int(b.get("port", 443))
                     except (ValueError, TypeError):
                         return self._error(f"Broker at index {i} has invalid port")
-                    
+
                     new_broker = {
-                        "name":      str(b["name"]).strip(),
-                        "enabled":   b.get("enabled", False),
+                        "name": str(b["name"]).strip(),
+                        "enabled": b.get("enabled", False),
                         "transport": str(b.get("transport", "websockets")).strip(),
-                        "host":      str(b["host"]).strip(),
-                        "port":      port,
-                        "format":    str(b["format"]).strip(),
+                        "host": str(b["host"]).strip(),
+                        "port": port,
+                        "format": str(b["format"]).strip(),
                         "disallowed_packet_types": list(b.get("disallowed_packet_types", [])),
                         "retain_status": bool(b.get("retain_status", False)),
                         "tls": {
-                            "enabled": bool(b.get("tls", {}).get("enabled", True if port == 443 else False)),
+                            "enabled": bool(
+                                b.get("tls", {}).get("enabled", True if port == 443 else False)
+                            ),
                             "insecure": bool(b.get("tls", {}).get("insecure", False)),
-                        }
+                        },
                     }
-                    
+
                     if b.get("use_jwt_auth", False):
                         new_broker["use_jwt_auth"] = True
                         new_broker["audience"] = str(b["audience"]).strip()
@@ -1477,11 +1499,13 @@ class APIEndpoints:
 
             if result.get("success"):
                 logger.info(f"MQTT config updated: {list(mqtt_updates.keys())}")
-                return self._success({
-                    "persisted": result.get("saved", False),
-                    "restart_required": True,
-                    "message": "Observer settings saved. Restart the service for changes to take effect.",
-                })
+                return self._success(
+                    {
+                        "persisted": result.get("saved", False),
+                        "restart_required": True,
+                        "message": "Observer settings saved. Restart the service for changes to take effect.",
+                    }
+                )
             else:
                 return self._error(result.get("error", "Failed to update LetsMesh configuration"))
 
@@ -1608,7 +1632,9 @@ class APIEndpoints:
                     add_error("repeater.security", "Missing required section 'repeater.security'")
                     security = {}
 
-                admin_password = (security.get("admin_password") if isinstance(security, dict) else "") or ""
+                admin_password = (
+                    security.get("admin_password") if isinstance(security, dict) else ""
+                ) or ""
                 if not str(admin_password).strip():
                     add_error("repeater.security.admin_password", "Admin password is required")
 
@@ -1651,13 +1677,29 @@ class APIEndpoints:
                         add_error("radio.frequency", "Frequency must be 100-1000 MHz")
 
                     bandwidth = as_int((radio or {}).get("bandwidth"), "radio.bandwidth")
-                    valid_bw = [7800, 10400, 15600, 20800, 31250, 41700, 62500, 125000, 250000, 500000]
+                    valid_bw = [
+                        7800,
+                        10400,
+                        15600,
+                        20800,
+                        31250,
+                        41700,
+                        62500,
+                        125000,
+                        250000,
+                        500000,
+                    ]
                     if bandwidth is None:
                         add_error("radio.bandwidth", "Bandwidth is required")
                     elif bandwidth not in valid_bw:
-                        add_error("radio.bandwidth", f"Bandwidth must be one of {[b / 1000 for b in valid_bw]} kHz")
+                        add_error(
+                            "radio.bandwidth",
+                            f"Bandwidth must be one of {[b / 1000 for b in valid_bw]} kHz",
+                        )
 
-                    spreading_factor = as_int((radio or {}).get("spreading_factor"), "radio.spreading_factor")
+                    spreading_factor = as_int(
+                        (radio or {}).get("spreading_factor"), "radio.spreading_factor"
+                    )
                     if spreading_factor is None:
                         add_error("radio.spreading_factor", "Spreading factor is required")
                     elif spreading_factor < 5 or spreading_factor > 12:
@@ -1675,11 +1717,15 @@ class APIEndpoints:
                     elif tx_power < -9 or tx_power > 30:
                         add_error("radio.tx_power", "TX power must be between -9 and +30 dBm")
 
-                    preamble_length = as_int((radio or {}).get("preamble_length"), "radio.preamble_length")
+                    preamble_length = as_int(
+                        (radio or {}).get("preamble_length"), "radio.preamble_length"
+                    )
                     if preamble_length is None:
                         add_error("radio.preamble_length", "Preamble length is required")
                     elif preamble_length <= 0:
-                        add_error("radio.preamble_length", "Preamble length must be greater than zero")
+                        add_error(
+                            "radio.preamble_length", "Preamble length must be greater than zero"
+                        )
 
                 if radio_type in ("sx1262", "sx1262_ch341"):
                     sx1262_cfg = config_yaml.get("sx1262")
@@ -1701,7 +1747,9 @@ class APIEndpoints:
                         value = sx1262_cfg.get(key) if isinstance(sx1262_cfg, dict) else None
                         parsed = as_int(value, f"sx1262.{key}")
                         if parsed is None:
-                            add_error(f"sx1262.{key}", f"Missing or invalid required setting '{key}'")
+                            add_error(
+                                f"sx1262.{key}", f"Missing or invalid required setting '{key}'"
+                            )
 
                     en_pins = sx1262_cfg.get("en_pins") if isinstance(sx1262_cfg, dict) else None
                     if en_pins is not None:
@@ -1718,13 +1766,17 @@ class APIEndpoints:
                 if radio_type == "sx1262_ch341":
                     ch341_cfg = config_yaml.get("ch341")
                     if not isinstance(ch341_cfg, dict):
-                        add_error("ch341", "Missing required section 'ch341' for radio_type sx1262_ch341")
+                        add_error(
+                            "ch341", "Missing required section 'ch341' for radio_type sx1262_ch341"
+                        )
                         ch341_cfg = {}
                     for key in ("vid", "pid"):
                         value = ch341_cfg.get(key) if isinstance(ch341_cfg, dict) else None
                         parsed = as_int(value, f"ch341.{key}")
                         if parsed is None:
-                            add_error(f"ch341.{key}", f"Missing or invalid required setting '{key}'")
+                            add_error(
+                                f"ch341.{key}", f"Missing or invalid required setting '{key}'"
+                            )
 
                 if radio_type == "kiss":
                     kiss_cfg = config_yaml.get("kiss")
@@ -1743,26 +1795,37 @@ class APIEndpoints:
                 if radio_type == "pymc_usb":
                     usb_cfg = config_yaml.get("pymc_usb")
                     if not isinstance(usb_cfg, dict):
-                        add_error("pymc_usb", "Missing required section 'pymc_usb' for radio_type pymc_usb")
+                        add_error(
+                            "pymc_usb",
+                            "Missing required section 'pymc_usb' for radio_type pymc_usb",
+                        )
                         usb_cfg = {}
                     port = (usb_cfg.get("port") if isinstance(usb_cfg, dict) else "") or ""
                     if not str(port).strip():
                         add_error("pymc_usb.port", "pymc_usb.port is required")
                     baud = as_int((usb_cfg or {}).get("baudrate"), "pymc_usb.baudrate")
                     if baud is not None and baud <= 0:
-                        add_error("pymc_usb.baudrate", "pymc_usb.baudrate must be greater than zero")
+                        add_error(
+                            "pymc_usb.baudrate", "pymc_usb.baudrate must be greater than zero"
+                        )
 
                 if radio_type == "pymc_tcp":
                     tcp_cfg = config_yaml.get("pymc_tcp")
                     if not isinstance(tcp_cfg, dict):
-                        add_error("pymc_tcp", "Missing required section 'pymc_tcp' for radio_type pymc_tcp")
+                        add_error(
+                            "pymc_tcp",
+                            "Missing required section 'pymc_tcp' for radio_type pymc_tcp",
+                        )
                         tcp_cfg = {}
                     host = (tcp_cfg.get("host") if isinstance(tcp_cfg, dict) else "") or ""
                     host_str = str(host).strip()
                     if not host_str:
                         add_error("pymc_tcp.host", "pymc_tcp.host is required")
                     elif host_str == "REPLACE_WITH_MODEM_HOST":
-                        add_error("pymc_tcp.host", "Replace placeholder host with your modem hostname or IP")
+                        add_error(
+                            "pymc_tcp.host",
+                            "Replace placeholder host with your modem hostname or IP",
+                        )
                     port = as_int((tcp_cfg or {}).get("port"), "pymc_tcp.port")
                     if port is None:
                         add_error("pymc_tcp.port", "pymc_tcp.port is required")
@@ -1784,7 +1847,9 @@ class APIEndpoints:
                         "warning_count": len(warnings),
                     },
                     "config_path": self._config_path,
-                    "message": "Configuration is valid" if valid else "Configuration has validation errors",
+                    "message": "Configuration is valid"
+                    if valid
+                    else "Configuration has validation errors",
                 }
             )
 
@@ -1862,15 +1927,19 @@ class APIEndpoints:
                 if not tracemalloc.is_tracing():
                     # Use 1 frame instead of 10 — much less overhead & faster snapshots
                     tracemalloc.start(1)
-                self._tracemalloc_baseline = tracemalloc.take_snapshot().filter_traces((
-                    tracemalloc.Filter(False, tracemalloc.__file__),
-                    tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
-                ))
+                self._tracemalloc_baseline = tracemalloc.take_snapshot().filter_traces(
+                    (
+                        tracemalloc.Filter(False, tracemalloc.__file__),
+                        tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+                    )
+                )
                 logger.info("Memory tracing started")
-                return self._success({
-                    "tracing": True,
-                    "message": "Tracing started — check again after some time to see growth",
-                })
+                return self._success(
+                    {
+                        "tracing": True,
+                        "message": "Tracing started — check again after some time to see growth",
+                    }
+                )
 
             if action == "stop":
                 if tracemalloc.is_tracing():
@@ -1888,30 +1957,35 @@ class APIEndpoints:
         # Always include RSS regardless of tracing state
         try:
             import resource
+
             rusage = resource.getrusage(resource.RUSAGE_SELF)
             result["rss_mb"] = round(rusage.ru_maxrss / 1024, 1)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(f"Could not read process RSS usage: {exc}")
 
         if not tracing:
             return self._success(result)
 
         # Filter out tracemalloc's own allocations to keep snapshot small & fast
-        current = tracemalloc.take_snapshot().filter_traces((
-            tracemalloc.Filter(False, tracemalloc.__file__),
-            tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
-        ))
+        current = tracemalloc.take_snapshot().filter_traces(
+            (
+                tracemalloc.Filter(False, tracemalloc.__file__),
+                tracemalloc.Filter(False, "<frozen importlib._bootstrap>"),
+            )
+        )
         baseline = getattr(self, "_tracemalloc_baseline", None)
 
         # Top 20 allocations right now
         top_current = current.statistics("lineno")[:20]
         current_stats = []
         for stat in top_current:
-            current_stats.append({
-                "file": str(stat.traceback),
-                "size_kb": round(stat.size / 1024, 1),
-                "count": stat.count,
-            })
+            current_stats.append(
+                {
+                    "file": str(stat.traceback),
+                    "size_kb": round(stat.size / 1024, 1),
+                    "count": stat.count,
+                }
+            )
         result["current_top_20"] = current_stats
 
         # Growth since baseline
@@ -1921,12 +1995,14 @@ class APIEndpoints:
             growth.sort(key=lambda d: d.size_diff, reverse=True)
             growth_stats = []
             for stat in growth[:20]:
-                growth_stats.append({
-                    "file": str(stat.traceback),
-                    "size_diff_kb": round(stat.size_diff / 1024, 1),
-                    "count_diff": stat.count_diff,
-                    "current_size_kb": round(stat.size / 1024, 1),
-                })
+                growth_stats.append(
+                    {
+                        "file": str(stat.traceback),
+                        "size_diff_kb": round(stat.size_diff / 1024, 1),
+                        "count_diff": stat.count_diff,
+                        "current_size_kb": round(stat.size / 1024, 1),
+                    }
+                )
             result["growth_since_baseline"] = growth_stats
 
         traced_current, traced_peak = tracemalloc.get_traced_memory()
@@ -2090,7 +2166,9 @@ class APIEndpoints:
             end_ts = float(end_timestamp) if end_timestamp is not None else None
             limit_int = min(int(limit), 50000)
             packets = self._get_storage().get_airtime_data(
-                start_timestamp=start_ts, end_timestamp=end_ts, limit=limit_int,
+                start_timestamp=start_ts,
+                end_timestamp=end_ts,
+                limit=limit_int,
             )
             return self._success(packets, count=len(packets))
         except Exception as e:
@@ -2143,17 +2221,6 @@ class APIEndpoints:
             return self._success(packet) if packet else self._error("Packet not found")
         except Exception as e:
             logger.error(f"Error getting packet by hash: {e}")
-            return self._error(e)
-
-    @cherrypy.expose
-    @cherrypy.tools.json_out()
-    def packet_type_stats(self, hours=24):
-        try:
-            hours = int(hours)
-            stats = self._get_storage().get_packet_type_stats(hours=hours)
-            return self._success(stats)
-        except Exception as e:
-            logger.error(f"Error getting packet type stats: {e}")
             return self._error(e)
 
     @cherrypy.expose
@@ -2364,7 +2431,6 @@ class APIEndpoints:
             self.config["radio"]["cad"]["peak_threshold"] = peak
             self.config["radio"]["cad"]["min_threshold"] = min_val
 
-            config_path = getattr(self, "_config_path", "/etc/pymc_repeater/config.yaml")
             saved = self.config_manager.save_to_file()
             if not saved:
                 return self._error("Failed to save configuration to file")
@@ -2448,16 +2514,18 @@ class APIEndpoints:
                 if freq < 100_000_000 or freq > 1_000_000_000:
                     return self._error("Frequency must be 100-1000 MHz")
                 self.config["radio"]["frequency"] = freq
-                applied.append(f"freq={freq/1_000_000:.3f}MHz")
+                applied.append(f"freq={freq / 1_000_000:.3f}MHz")
 
             # Update bandwidth (in Hz)
             if "bandwidth" in data:
                 bw = int(float(data["bandwidth"]))
                 valid_bw = [7800, 10400, 15600, 20800, 31250, 41700, 62500, 125000, 250000, 500000]
                 if bw not in valid_bw:
-                    return self._error(f"Bandwidth must be one of {[b/1000 for b in valid_bw]} kHz")
+                    return self._error(
+                        f"Bandwidth must be one of {[b / 1000 for b in valid_bw]} kHz"
+                    )
                 self.config["radio"]["bandwidth"] = bw
-                applied.append(f"bw={bw/1000}kHz")
+                applied.append(f"bw={bw / 1000}kHz")
 
             # Update spreading factor
             if "spreading_factor" in data:
@@ -2554,7 +2622,9 @@ class APIEndpoints:
             if "path_hash_mode" in data:
                 phm = int(data["path_hash_mode"])
                 if phm not in (0, 1, 2):
-                    return self._error("Path hash mode must be 0 (1-byte), 1 (2-byte), or 2 (3-byte)")
+                    return self._error(
+                        "Path hash mode must be 0 (1-byte), 1 (2-byte), or 2 (3-byte)"
+                    )
                 self.config["mesh"]["path_hash_mode"] = phm
                 applied.append(f"path_hash_mode={phm}")
 
@@ -2672,10 +2742,7 @@ class APIEndpoints:
             storage = self._get_storage()
             hours = int(hours)
             count = storage.get_crc_error_count(hours=hours)
-            return self._success({
-                "crc_error_count": count,
-                "hours": hours
-            })
+            return self._success({"crc_error_count": count, "hours": hours})
         except Exception as e:
             logger.error(f"Error fetching CRC error count: {e}")
             return self._error(e)
@@ -2689,11 +2756,7 @@ class APIEndpoints:
             hours = int(hours)
             limit = int(limit) if limit else None
             history = storage.get_crc_error_history(hours=hours, limit=limit)
-            return self._success({
-                "history": history,
-                "hours": hours,
-                "count": len(history)
-            })
+            return self._success({"history": history, "hours": hours, "count": len(history)})
         except Exception as e:
             logger.error(f"Error fetching CRC error history: {e}")
             return self._error(e)
@@ -2775,7 +2838,12 @@ class APIEndpoints:
                 adverts,
                 count=len(adverts),
                 contact_type=contact_type,
-                filters={"contact_type": contact_type, "limit": limit_int, "offset": offset_int, "hours": hours_int},
+                filters={
+                    "contact_type": contact_type,
+                    "limit": limit_int,
+                    "offset": offset_int,
+                    "hours": hours_int,
+                },
             )
 
         except ValueError as e:
@@ -2816,19 +2884,19 @@ class APIEndpoints:
     def advert_rate_limit_stats(self):
         """Get advert rate limiting statistics and adaptive tier info."""
         try:
-            if not self.daemon_instance or not hasattr(self.daemon_instance, 'advert_helper'):
+            if not self.daemon_instance or not hasattr(self.daemon_instance, "advert_helper"):
                 return self._error("Advert helper not available")
-            
+
             advert_helper = self.daemon_instance.advert_helper
             if not advert_helper:
                 return self._error("Advert helper not initialized")
-            
-            if not hasattr(advert_helper, 'get_rate_limit_stats'):
+
+            if not hasattr(advert_helper, "get_rate_limit_stats"):
                 return self._error("Rate limit stats not supported by this advert helper version")
-            
+
             stats = advert_helper.get_rate_limit_stats()
             return self._success(stats)
-            
+
         except Exception as e:
             logger.error(f"Error getting advert rate limit stats: {e}")
             return self._error(e)
@@ -3105,9 +3173,7 @@ class APIEndpoints:
             trace_helper = self.daemon_instance.trace_helper
 
             # Generate unique tag for this ping
-            import random
-
-            trace_tag = random.randint(0, 0xFFFFFFFF)
+            trace_tag = secrets.randbits(32)
 
             # Create trace packet
             from pymc_core.protocol import PacketBuilder
@@ -3127,7 +3193,9 @@ class APIEndpoints:
 
                 # Send packet via router
                 await router.inject_packet(packet)
-                logger.info(f"Ping sent to 0x{target_hash:0{hex_chars}x} with tag {trace_tag} (path_hash_mode={path_hash_mode})")
+                logger.info(
+                    f"Ping sent to 0x{target_hash:0{hex_chars}x} with tag {trace_tag} (path_hash_mode={path_hash_mode})"
+                )
 
                 try:
                     await asyncio.wait_for(event.wait(), timeout=timeout)
@@ -3277,11 +3345,7 @@ class APIEndpoints:
                 settings = comp_config.get("settings", {})
 
                 matching = next(
-                    (
-                        r
-                        for r in registered_identities
-                        if r["name"] == f"companion:{name}"
-                    ),
+                    (r for r in registered_identities if r["name"] == f"companion:{name}"),
                     None,
                 )
 
@@ -3295,9 +3359,7 @@ class APIEndpoints:
                     {
                         "name": name,
                         "type": "companion",
-                        "identity_key": (
-                            ik_hex[:16] + "..." if len(ik_hex) > 16 else ik_hex
-                        ),
+                        "identity_key": (ik_hex[:16] + "..." if len(ik_hex) > 16 else ik_hex),
                         "identity_key_length": len(ik_hex),
                         "settings": settings,
                         "hash": matching["hash"] if matching else None,
@@ -3663,9 +3725,7 @@ class APIEndpoints:
                             key_bytes = bytes.fromhex(new_key)
                             if len(key_bytes) in (32, 64):
                                 identity["identity_key"] = new_key
-                                logger.info(
-                                    f"Updated identity_key for companion '{resolved_name}'"
-                                )
+                                logger.info(f"Updated identity_key for companion '{resolved_name}'")
                         except ValueError:
                             pass
 
@@ -3836,7 +3896,9 @@ class APIEndpoints:
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
-    def delete_identity(self, name=None, type=None, lookup_identity_key=None, public_key_prefix=None):
+    def delete_identity(
+        self, name=None, type=None, lookup_identity_key=None, public_key_prefix=None
+    ):
         """
         DELETE /api/delete_identity?name=<name>&type=<room_server|companion> - Delete an identity
         Companions may also be deleted with lookup_identity_key or public_key_prefix when name is empty.
@@ -3857,9 +3919,7 @@ class APIEndpoints:
 
             identity_type = (type or "room_server").lower()
             if identity_type not in ["room_server", "companion"]:
-                return self._error(
-                    f"Invalid type: {type}. Use 'room_server' or 'companion'."
-                )
+                return self._error(f"Invalid type: {type}. Use 'room_server' or 'companion'.")
 
             identities_config = self.config.get("identities", {})
 
@@ -3911,9 +3971,7 @@ class APIEndpoints:
 
             # Find and remove the identity
             initial_count = len(room_servers)
-            room_servers = [
-                r for r in room_servers if str(r.get("name") or "").strip() != name_s
-            ]
+            room_servers = [r for r in room_servers if str(r.get("name") or "").strip() != name_s]
 
             if len(room_servers) == initial_count:
                 return self._error(f"Identity '{name_s}' not found")
@@ -4140,7 +4198,9 @@ class APIEndpoints:
                         {
                             "name": "repeater",
                             "type": "repeater",
-                            "hash": self._fmt_hash(self.daemon_instance.local_identity.get_public_key()),
+                            "hash": self._fmt_hash(
+                                self.daemon_instance.local_identity.get_public_key()
+                            ),
                             "max_clients": repeater_acl.max_clients,
                             "authenticated_clients": repeater_acl.get_num_clients(),
                             "has_admin_password": bool(repeater_acl.admin_password),
@@ -4185,7 +4245,11 @@ class APIEndpoints:
                         writer = getattr(fs, "_client_writer", None)
                         active_by_hash[h] = writer is not None
                         if writer is not None:
-                            peername = writer.get_extra_info("peername") if hasattr(writer, "get_extra_info") else None
+                            peername = (
+                                writer.get_extra_info("peername")
+                                if hasattr(writer, "get_extra_info")
+                                else None
+                            )
                             client_ip_by_hash[h] = str(peername[0]) if peername else None
                 except (ValueError, TypeError):
                     pass
@@ -5344,9 +5408,7 @@ class APIEndpoints:
                     # Preserve identity keys that are redacted
                     for id_section in ("room_servers", "companions"):
                         entries = value.get(id_section, []) or []
-                        cur_entries = (
-                            self.config.get("identities", {}).get(id_section, []) or []
-                        )
+                        cur_entries = self.config.get("identities", {}).get(id_section, []) or []
                         cur_by_name = {e.get("name"): e for e in cur_entries}
                         for entry in entries:
                             if entry.get("identity_key") == "*** REDACTED ***":
@@ -5381,7 +5443,7 @@ class APIEndpoints:
                 return self._error("No valid configuration sections found in import")
 
             # Persist and live-reload
-            result = self.config_manager.update_and_save(
+            self.config_manager.update_and_save(
                 updates={},  # Already applied above
                 live_update=True,
                 live_update_sections=updated_sections,
@@ -5432,7 +5494,9 @@ class APIEndpoints:
             elif isinstance(identity_key, str):
                 key_hex = identity_key
             else:
-                return self._error(f"Identity key has unexpected type: {type(identity_key).__name__}")
+                return self._error(
+                    f"Identity key has unexpected type: {type(identity_key).__name__}"
+                )
 
             result = {
                 "identity_key_hex": key_hex,
@@ -5446,8 +5510,8 @@ class APIEndpoints:
                     pub = li.get_public_key()
                     result["public_key_hex"] = bytes(pub).hex()
                     result["node_address"] = f"0x{pub[0]:02x}"
-            except Exception:
-                pass  # Not critical
+            except Exception as exc:
+                logger.debug(f"Could not derive local identity public key info: {exc}")
 
             return {"success": True, "data": result}
 
@@ -5545,9 +5609,7 @@ class APIEndpoints:
 
             # Add RRD file size if it exists
             rrd_path = storage.sqlite_handler.storage_dir / "metrics.rrd"
-            stats["rrd_size_bytes"] = (
-                rrd_path.stat().st_size if rrd_path.exists() else 0
-            )
+            stats["rrd_size_bytes"] = rrd_path.stat().st_size if rrd_path.exists() else 0
 
             return {"success": True, "data": stats}
         except Exception as e:
@@ -5578,10 +5640,16 @@ class APIEndpoints:
                 return self._error("Missing 'tables' parameter")
 
             ALL_PURGEABLE = [
-                "packets", "adverts", "noise_floor", "crc_errors",
-                "room_messages", "room_client_sync",
-                "companion_contacts", "companion_channels",
-                "companion_messages", "companion_prefs",
+                "packets",
+                "adverts",
+                "noise_floor",
+                "crc_errors",
+                "room_messages",
+                "room_client_sync",
+                "companion_contacts",
+                "companion_channels",
+                "companion_messages",
+                "companion_prefs",
             ]
 
             if tables_param == "all":

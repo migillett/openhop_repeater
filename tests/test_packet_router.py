@@ -38,10 +38,10 @@ from repeater.packet_router import (
     _is_direct_final_hop,
 )
 
-
 # ---------------------------------------------------------------------------
 # Minimal daemon stub
 # ---------------------------------------------------------------------------
+
 
 def _make_daemon():
     """Minimal daemon that satisfies PacketRouter without touching hardware."""
@@ -84,8 +84,8 @@ def _make_bridge():
 # Tests
 # ---------------------------------------------------------------------------
 
-class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
 
+class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
     # ── 1. Cap enforcement ──────────────────────────────────────────────────
 
     async def test_cap_drops_packets_when_full(self):
@@ -100,7 +100,7 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         barrier = asyncio.Event()
 
         async def slow_route(pkt):
-            await barrier.wait()   # blocks until we release
+            await barrier.wait()  # blocks until we release
 
         routed = []
 
@@ -115,7 +115,7 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         # Fill the cap
         for _ in range(3):
             await router.enqueue(_make_packet())
-        await asyncio.sleep(0.05)   # let queue drain into tasks
+        await asyncio.sleep(0.05)  # let queue drain into tasks
         self.assertEqual(router._in_flight, 3)
 
         # These should be dropped
@@ -123,12 +123,10 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
             await router.enqueue(_make_packet())
         await asyncio.sleep(0.05)
 
-        self.assertEqual(router._in_flight, 3,
-                         "In-flight count exceeded cap")
-        self.assertEqual(router._cap_drop_count, 5,
-                         "Expected 5 cap-drops, got different count")
+        self.assertEqual(router._in_flight, 3, "In-flight count exceeded cap")
+        self.assertEqual(router._cap_drop_count, 5, "Expected 5 cap-drops, got different count")
 
-        barrier.set()   # release blocked tasks
+        barrier.set()  # release blocked tasks
         await router.stop()
 
     # ── 2. Drop counter ─────────────────────────────────────────────────────
@@ -218,7 +216,7 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
 
         async def slow_route(pkt):
             started.set()
-            await asyncio.sleep(0.2)   # finishes well within 5 s timeout
+            await asyncio.sleep(0.2)  # finishes well within 5 s timeout
             completed.append(pkt)
 
         router._route_packet = slow_route
@@ -233,8 +231,7 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         await router.stop()
 
         # Task should have completed, not been cancelled
-        self.assertEqual(len(completed), 1,
-                         "In-flight task was cancelled instead of drained")
+        self.assertEqual(len(completed), 1, "In-flight task was cancelled instead of drained")
 
     async def test_stop_cancels_tasks_that_exceed_timeout(self):
         """
@@ -250,15 +247,12 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         async def hanging_route(pkt):
             started.set()
             try:
-                await asyncio.sleep(999)   # will not finish within 5 s
+                await asyncio.sleep(999)  # will not finish within 5 s
             except asyncio.CancelledError:
                 cancelled.append(pkt)
                 raise
 
         router._route_packet = hanging_route
-
-        # Patch the timeout to 0.1 s so the test runs fast
-        original_stop = router.stop
 
         async def fast_stop():
             router.running = False
@@ -283,8 +277,7 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
 
         await router.stop()
 
-        self.assertEqual(len(cancelled), 1,
-                         "Hanging task was not cancelled on shutdown")
+        self.assertEqual(len(cancelled), 1, "Hanging task was not cancelled on shutdown")
 
     # ── 4. Route-tasks set stays in sync with counter ───────────────────────
 
@@ -296,7 +289,7 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         router = PacketRouter(_make_daemon())
 
         async def fast_route(pkt):
-            await asyncio.sleep(0)   # yield, then done
+            await asyncio.sleep(0)  # yield, then done
 
         router._route_packet = fast_route
 
@@ -308,10 +301,10 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         # Give tasks time to complete
         await asyncio.sleep(0.1)
 
-        self.assertEqual(len(router._route_tasks), 0,
-                         "_route_tasks not cleaned up after task completion")
-        self.assertEqual(router._in_flight, 0,
-                         "_in_flight counter not back to 0 after completion")
+        self.assertEqual(
+            len(router._route_tasks), 0, "_route_tasks not cleaned up after task completion"
+        )
+        self.assertEqual(router._in_flight, 0, "_in_flight counter not back to 0 after completion")
 
         await router.stop()
 
@@ -339,8 +332,9 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         await asyncio.sleep(0.05)
 
         self.assertEqual(
-            router._in_flight, len(router._route_tasks),
-            f"Counter ({router._in_flight}) != set size ({len(router._route_tasks)})"
+            router._in_flight,
+            len(router._route_tasks),
+            f"Counter ({router._in_flight}) != set size ({len(router._route_tasks)})",
         )
 
         barrier.set()

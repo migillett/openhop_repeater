@@ -5,7 +5,6 @@ logger = logging.getLogger("IdentityManager")
 
 
 class IdentityManager:
-
     def __init__(self, config: dict):
         self.config = config
         self.identities: Dict[int, Tuple[Any, dict, str]] = {}

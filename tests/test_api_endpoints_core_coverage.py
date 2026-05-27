@@ -21,9 +21,7 @@ def _make_api(config=None):
 
 
 def _attach_storage(api, storage):
-    api.daemon_instance = SimpleNamespace(
-        repeater_handler=SimpleNamespace(storage=storage)
-    )
+    api.daemon_instance = SimpleNamespace(repeater_handler=SimpleNamespace(storage=storage))
 
 
 @pytest.fixture
@@ -333,7 +331,7 @@ def test_config_export_redacts_secrets_and_identity_keys(cherrypy_ctx):
                 "companions": [{"name": "c1", "identity_key": bytes.fromhex("0102")}],
                 "room_servers": [{"name": "r1", "identity_key": bytes.fromhex("0304")}],
             },
-            "misc": {"blob": b"\x0A\x0B"},
+            "misc": {"blob": b"\x0a\x0b"},
         }
     )
 
@@ -689,7 +687,9 @@ def test_db_vacuum_options_success_and_error(cherrypy_ctx):
     assert result["success"] is True
     assert result["data"] == {"size_before": 1000, "size_after": 700, "freed_bytes": 300}
 
-    sqlite_path.stat = MagicMock(side_effect=[SimpleNamespace(st_size=700), SimpleNamespace(st_size=700)])
+    sqlite_path.stat = MagicMock(
+        side_effect=[SimpleNamespace(st_size=700), SimpleNamespace(st_size=700)]
+    )
     sqlite_handler.vacuum.side_effect = RuntimeError("vacuum failed")
     err = api.db_vacuum()
     assert err["success"] is False
@@ -840,96 +840,99 @@ radio_type: none
 
 
 def test_update_web_config_options_no_updates_success_failure(cherrypy_ctx):
-        request, _ = cherrypy_ctx
-        api = _make_api({"web": {"cors_enabled": True}})
+    request, _ = cherrypy_ctx
+    api = _make_api({"web": {"cors_enabled": True}})
 
-        request.method = "OPTIONS"
-        assert api.update_web_config() == ""
+    request.method = "OPTIONS"
+    assert api.update_web_config() == ""
 
-        request.method = "POST"
-        request.json = {}
-        no_updates = api.update_web_config()
-        assert no_updates["success"] is False
-        assert "No configuration updates" in no_updates["error"]
+    request.method = "POST"
+    request.json = {}
+    no_updates = api.update_web_config()
+    assert no_updates["success"] is False
+    assert "No configuration updates" in no_updates["error"]
 
-        request.json = {"web": {"cors_enabled": True}}
-        api.config_manager.update_and_save.return_value = {"success": True, "saved": True}
-        ok = api.update_web_config()
-        assert ok["success"] is True
-        assert ok["data"]["persisted"] is True
-        api.config_manager.update_and_save.assert_called_with(
-                updates={"web": {"cors_enabled": True}},
-                live_update=False,
-        )
+    request.json = {"web": {"cors_enabled": True}}
+    api.config_manager.update_and_save.return_value = {"success": True, "saved": True}
+    ok = api.update_web_config()
+    assert ok["success"] is True
+    assert ok["data"]["persisted"] is True
+    api.config_manager.update_and_save.assert_called_with(
+        updates={"web": {"cors_enabled": True}},
+        live_update=False,
+    )
 
-        api.config_manager.update_and_save.return_value = {"success": False, "error": "bad"}
-        fail = api.update_web_config()
-        assert fail["success"] is False
-        assert fail["error"] == "bad"
+    api.config_manager.update_and_save.return_value = {"success": False, "error": "bad"}
+    fail = api.update_web_config()
+    assert fail["success"] is False
+    assert fail["error"] == "bad"
 
 
 def test_update_web_config_requires_post_and_handles_exception(cherrypy_ctx):
-        request, _ = cherrypy_ctx
-        api = _make_api({"web": {"cors_enabled": True}})
+    request, _ = cherrypy_ctx
+    api = _make_api({"web": {"cors_enabled": True}})
 
-        request.method = "GET"
-        with pytest.raises(cherrypy.HTTPError) as exc:
-                api.update_web_config()
-        assert exc.value.status == 405
+    request.method = "GET"
+    with pytest.raises(cherrypy.HTTPError) as exc:
+        api.update_web_config()
+    assert exc.value.status == 405
 
-        request.method = "POST"
-        request.json = {"web": {"site_name": "mesh"}}
-        api.config_manager.update_and_save.side_effect = RuntimeError("write failed")
-        err = api.update_web_config()
-        assert err["success"] is False
-        assert "write failed" in err["error"]
+    request.method = "POST"
+    request.json = {"web": {"site_name": "mesh"}}
+    api.config_manager.update_and_save.side_effect = RuntimeError("write failed")
+    err = api.update_web_config()
+    assert err["success"] is False
+    assert "write failed" in err["error"]
 
 
 def test_validate_config_top_level_must_be_mapping(cherrypy_ctx, tmp_path):
-        request, _ = cherrypy_ctx
-        request.method = "GET"
-        api = _make_api()
-        api._config_path = str(tmp_path / "config.yaml")
-        (tmp_path / "config.yaml").write_text("- list\n- not\n- mapping\n", encoding="utf-8")
+    request, _ = cherrypy_ctx
+    request.method = "GET"
+    api = _make_api()
+    api._config_path = str(tmp_path / "config.yaml")
+    (tmp_path / "config.yaml").write_text("- list\n- not\n- mapping\n", encoding="utf-8")
 
-        result = api.validate_config()
+    result = api.validate_config()
 
-        assert result["success"] is True
-        assert result["data"]["valid"] is False
-        assert any(e["message"].startswith("Top-level YAML value must be a mapping") for e in result["data"]["errors"])
+    assert result["success"] is True
+    assert result["data"]["valid"] is False
+    assert any(
+        e["message"].startswith("Top-level YAML value must be a mapping")
+        for e in result["data"]["errors"]
+    )
 
 
 def test_validate_config_invalid_radio_type_and_missing_sections(cherrypy_ctx, tmp_path):
-        request, _ = cherrypy_ctx
-        request.method = "GET"
-        api = _make_api()
-        api._config_path = str(tmp_path / "config.yaml")
-        (tmp_path / "config.yaml").write_text(
-                """
+    request, _ = cherrypy_ctx
+    request.method = "GET"
+    api = _make_api()
+    api._config_path = str(tmp_path / "config.yaml")
+    (tmp_path / "config.yaml").write_text(
+        """
 repeater:
     node_name: ""
 radio_type: weird_radio
 """.strip(),
-                encoding="utf-8",
-        )
+        encoding="utf-8",
+    )
 
-        result = api.validate_config()
+    result = api.validate_config()
 
-        assert result["success"] is True
-        assert result["data"]["valid"] is False
-        paths = {e["path"] for e in result["data"]["errors"]}
-        assert "repeater.node_name" in paths
-        assert "repeater.security" in paths
-        assert "radio_type" in paths
+    assert result["success"] is True
+    assert result["data"]["valid"] is False
+    paths = {e["path"] for e in result["data"]["errors"]}
+    assert "repeater.node_name" in paths
+    assert "repeater.security" in paths
+    assert "radio_type" in paths
 
 
 def test_validate_config_pymc_tcp_placeholder_and_bad_port(cherrypy_ctx, tmp_path):
-        request, _ = cherrypy_ctx
-        request.method = "GET"
-        api = _make_api()
-        api._config_path = str(tmp_path / "config.yaml")
-        (tmp_path / "config.yaml").write_text(
-                """
+    request, _ = cherrypy_ctx
+    request.method = "GET"
+    api = _make_api()
+    api._config_path = str(tmp_path / "config.yaml")
+    (tmp_path / "config.yaml").write_text(
+        """
 repeater:
     node_name: mesh-node-03
     security:
@@ -946,25 +949,25 @@ pymc_tcp:
     host: REPLACE_WITH_MODEM_HOST
     port: 70000
 """.strip(),
-                encoding="utf-8",
-        )
+        encoding="utf-8",
+    )
 
-        result = api.validate_config()
+    result = api.validate_config()
 
-        assert result["success"] is True
-        assert result["data"]["valid"] is False
-        paths = {e["path"] for e in result["data"]["errors"]}
-        assert "pymc_tcp.host" in paths
-        assert "pymc_tcp.port" in paths
+    assert result["success"] is True
+    assert result["data"]["valid"] is False
+    paths = {e["path"] for e in result["data"]["errors"]}
+    assert "pymc_tcp.host" in paths
+    assert "pymc_tcp.port" in paths
 
 
 def test_validate_config_sx1262_ch341_missing_sections(cherrypy_ctx, tmp_path):
-        request, _ = cherrypy_ctx
-        request.method = "GET"
-        api = _make_api()
-        api._config_path = str(tmp_path / "config.yaml")
-        (tmp_path / "config.yaml").write_text(
-                """
+    request, _ = cherrypy_ctx
+    request.method = "GET"
+    api = _make_api()
+    api._config_path = str(tmp_path / "config.yaml")
+    (tmp_path / "config.yaml").write_text(
+        """
 repeater:
     node_name: mesh-node-04
     security:
@@ -978,26 +981,26 @@ radio:
     tx_power: 22
     preamble_length: 16
 """.strip(),
-                encoding="utf-8",
-        )
+        encoding="utf-8",
+    )
 
-        result = api.validate_config()
+    result = api.validate_config()
 
-        assert result["success"] is True
-        assert result["data"]["valid"] is False
-        paths = {e["path"] for e in result["data"]["errors"]}
-        assert "sx1262" in paths
-        assert "ch341" in paths
+    assert result["success"] is True
+    assert result["data"]["valid"] is False
+    paths = {e["path"] for e in result["data"]["errors"]}
+    assert "sx1262" in paths
+    assert "ch341" in paths
 
 
 def test_validate_config_rejects_bool_numeric_fields(cherrypy_ctx, tmp_path):
-        """Booleans silently cast to int in Python, so this guards explicit type checks."""
-        request, _ = cherrypy_ctx
-        request.method = "GET"
-        api = _make_api()
-        api._config_path = str(tmp_path / "config.yaml")
-        (tmp_path / "config.yaml").write_text(
-                """
+    """Booleans silently cast to int in Python, so this guards explicit type checks."""
+    request, _ = cherrypy_ctx
+    request.method = "GET"
+    api = _make_api()
+    api._config_path = str(tmp_path / "config.yaml")
+    (tmp_path / "config.yaml").write_text(
+        """
 repeater:
     node_name: mesh-node-bool
     security:
@@ -1014,25 +1017,25 @@ kiss:
     port: /dev/ttyUSB0
     baud_rate: true
 """.strip(),
-                encoding="utf-8",
-        )
+        encoding="utf-8",
+    )
 
-        result = api.validate_config()
+    result = api.validate_config()
 
-        assert result["success"] is True
-        assert result["data"]["valid"] is False
-        errors = {e["path"]: e["message"] for e in result["data"]["errors"]}
-        assert "radio.bandwidth" in errors
-        assert "kiss.baud_rate" in errors
+    assert result["success"] is True
+    assert result["data"]["valid"] is False
+    errors = {e["path"]: e["message"] for e in result["data"]["errors"]}
+    assert "radio.bandwidth" in errors
+    assert "kiss.baud_rate" in errors
 
 
 def test_validate_config_radio_numeric_ranges_and_modes(cherrypy_ctx, tmp_path):
-        request, _ = cherrypy_ctx
-        request.method = "GET"
-        api = _make_api()
-        api._config_path = str(tmp_path / "config.yaml")
-        (tmp_path / "config.yaml").write_text(
-                """
+    request, _ = cherrypy_ctx
+    request.method = "GET"
+    api = _make_api()
+    api._config_path = str(tmp_path / "config.yaml")
+    (tmp_path / "config.yaml").write_text(
+        """
 repeater:
     node_name: mesh-node-ranges
     security:
@@ -1055,29 +1058,29 @@ sx1262:
     txen_pin: 18
     rxen_pin: 17
 """.strip(),
-                encoding="utf-8",
-        )
+        encoding="utf-8",
+    )
 
-        result = api.validate_config()
+    result = api.validate_config()
 
-        assert result["success"] is True
-        assert result["data"]["valid"] is False
-        paths = {e["path"] for e in result["data"]["errors"]}
-        assert "radio.frequency" in paths
-        assert "radio.bandwidth" in paths
-        assert "radio.spreading_factor" in paths
-        assert "radio.coding_rate" in paths
-        assert "radio.tx_power" in paths
-        assert "radio.preamble_length" in paths
+    assert result["success"] is True
+    assert result["data"]["valid"] is False
+    paths = {e["path"] for e in result["data"]["errors"]}
+    assert "radio.frequency" in paths
+    assert "radio.bandwidth" in paths
+    assert "radio.spreading_factor" in paths
+    assert "radio.coding_rate" in paths
+    assert "radio.tx_power" in paths
+    assert "radio.preamble_length" in paths
 
 
 def test_validate_config_en_pins_type_and_entry_validation(cherrypy_ctx, tmp_path):
-        request, _ = cherrypy_ctx
-        request.method = "GET"
-        api = _make_api()
-        api._config_path = str(tmp_path / "config.yaml")
-        (tmp_path / "config.yaml").write_text(
-                """
+    request, _ = cherrypy_ctx
+    request.method = "GET"
+    api = _make_api()
+    api._config_path = str(tmp_path / "config.yaml")
+    (tmp_path / "config.yaml").write_text(
+        """
 repeater:
     node_name: mesh-node-enpins
     security:
@@ -1101,67 +1104,67 @@ sx1262:
     rxen_pin: 17
     en_pins: [21, bad]
 """.strip(),
-                encoding="utf-8",
-        )
+        encoding="utf-8",
+    )
 
-        result = api.validate_config()
+    result = api.validate_config()
 
-        assert result["success"] is True
-        assert result["data"]["valid"] is False
-        paths = {e["path"] for e in result["data"]["errors"]}
-        assert "sx1262.en_pins[1]" in paths
+    assert result["success"] is True
+    assert result["data"]["valid"] is False
+    paths = {e["path"] for e in result["data"]["errors"]}
+    assert "sx1262.en_pins[1]" in paths
 
 
 def test_config_import_web_only_no_restart_required(cherrypy_ctx):
-        request, _ = cherrypy_ctx
-        request.method = "POST"
-        api = _make_api({"web": {"site_name": "old"}})
-        api.config_manager.update_and_save.return_value = {"ok": True}
-        api.config_manager.save_to_file.return_value = True
-        request.json = {"config": {"web": {"site_name": "new", "cors_enabled": True}}}
+    request, _ = cherrypy_ctx
+    request.method = "POST"
+    api = _make_api({"web": {"site_name": "old"}})
+    api.config_manager.update_and_save.return_value = {"ok": True}
+    api.config_manager.save_to_file.return_value = True
+    request.json = {"config": {"web": {"site_name": "new", "cors_enabled": True}}}
 
-        result = api.config_import()
+    result = api.config_import()
 
-        assert result["success"] is True
-        assert result["restart_required"] is False
-        assert result["sections_updated"] == ["web"]
-        assert api.config["web"]["site_name"] == "new"
-        assert api.config["web"]["cors_enabled"] is True
+    assert result["success"] is True
+    assert result["restart_required"] is False
+    assert result["sections_updated"] == ["web"]
+    assert api.config["web"]["site_name"] == "new"
+    assert api.config["web"]["cors_enabled"] is True
 
 
 def test_config_import_identity_redaction_preserves_by_name_for_room_servers(cherrypy_ctx):
-        request, _ = cherrypy_ctx
-        request.method = "POST"
-        api = _make_api(
-                {
-                        "identities": {
-                                "room_servers": [
-                                        {"name": "main-room", "identity_key": bytes.fromhex("ABCD")},
-                                ]
-                        }
-                }
-        )
-        api.config_manager.update_and_save.return_value = {"ok": True}
-        api.config_manager.save_to_file.return_value = True
-        request.json = {
-                "config": {
-                        "identities": {
-                                "room_servers": [
-                                        {"name": "main-room", "identity_key": "*** REDACTED ***"},
-                                        {"name": "new-room", "identity_key": "*** REDACTED ***"},
-                                ]
-                        }
-                }
+    request, _ = cherrypy_ctx
+    request.method = "POST"
+    api = _make_api(
+        {
+            "identities": {
+                "room_servers": [
+                    {"name": "main-room", "identity_key": bytes.fromhex("ABCD")},
+                ]
+            }
         }
+    )
+    api.config_manager.update_and_save.return_value = {"ok": True}
+    api.config_manager.save_to_file.return_value = True
+    request.json = {
+        "config": {
+            "identities": {
+                "room_servers": [
+                    {"name": "main-room", "identity_key": "*** REDACTED ***"},
+                    {"name": "new-room", "identity_key": "*** REDACTED ***"},
+                ]
+            }
+        }
+    }
 
-        result = api.config_import()
+    result = api.config_import()
 
-        assert result["success"] is True
-        rooms = api.config["identities"]["room_servers"]
-        by_name = {r["name"]: r["identity_key"] for r in rooms}
-        assert by_name["main-room"] == bytes.fromhex("ABCD")
-        # Unknown existing room keeps empty value when imported as redacted.
-        assert by_name["new-room"] == ""
+    assert result["success"] is True
+    rooms = api.config["identities"]["room_servers"]
+    by_name = {r["name"]: r["identity_key"] for r in rooms}
+    assert by_name["main-room"] == bytes.fromhex("ABCD")
+    # Unknown existing room keeps empty value when imported as redacted.
+    assert by_name["new-room"] == ""
 
 
 def test_stats_includes_versions_and_buildroot_image_info(cherrypy_ctx):
@@ -1169,7 +1172,10 @@ def test_stats_includes_versions_and_buildroot_image_info(cherrypy_ctx):
     api = _make_api({"radio_type": "sx1262", "web": {"site_name": "Field"}})
     api.stats_getter = lambda: {"uptime": 10}
 
-    with patch("repeater.web.api_endpoints.get_buildroot_image_info", return_value={"image_name": "pyMC", "image_version": "1.2.3"}):
+    with patch(
+        "repeater.web.api_endpoints.get_buildroot_image_info",
+        return_value={"image_name": "pyMC", "image_version": "1.2.3"},
+    ):
         out = api.stats()
 
     assert out["uptime"] == 10
@@ -1184,7 +1190,9 @@ def test_gps_snapshot_when_service_present_and_default_when_absent(cherrypy_ctx)
     del cherrypy_ctx
     api = _make_api({"gps": {"enabled": True}})
 
-    api.daemon_instance = SimpleNamespace(gps_service=SimpleNamespace(get_snapshot=lambda: {"running": True}))
+    api.daemon_instance = SimpleNamespace(
+        gps_service=SimpleNamespace(get_snapshot=lambda: {"running": True})
+    )
     out = api.gps()
     assert out == {"success": True, "data": {"running": True}}
 
@@ -1226,9 +1234,16 @@ def test_check_pymc_console_and_mqtt_status_and_broker_presets(cherrypy_ctx):
     assert status2["success"] is True
     assert status2["data"]["brokers"][0]["name"] == "main"
 
-    with patch("repeater.presets.list_presets", return_value=["waev"]), patch(
-        "repeater.presets.get_preset",
-        return_value={"display_name": "Waev", "website": "https://waev.app", "brokers": [{"host": "h"}]},
+    with (
+        patch("repeater.presets.list_presets", return_value=["waev"]),
+        patch(
+            "repeater.presets.get_preset",
+            return_value={
+                "display_name": "Waev",
+                "website": "https://waev.app",
+                "brokers": [{"host": "h"}],
+            },
+        ),
     ):
         presets = api.broker_presets()
     assert presets["success"] is True
@@ -1587,14 +1602,18 @@ def test_identity_endpoints_paths(cherrypy_ctx):
             if t == "room_server"
             else [("comp1", _FakeIdentityObj(0x51), {"settings": {"tcp_port": 5000}})]
         ),
-        get_identity_by_name=lambda n: (_FakeIdentityObj(0x42), {}, "room_server") if n == "main" else None,
+        get_identity_by_name=lambda n: (
+            (_FakeIdentityObj(0x42), {}, "room_server") if n == "main" else None
+        ),
         named_identities={"comp1": 1, "main": 1},
     )
     api.daemon_instance = SimpleNamespace(identity_manager=id_mgr)
     api.config = {
         "identities": {
             "room_servers": [{"name": "main", "identity_key": "a" * 64, "settings": {"x": 1}}],
-            "companions": [{"name": "comp1", "identity_key": "b" * 64, "settings": {"tcp_port": 5000}}],
+            "companions": [
+                {"name": "comp1", "identity_key": "b" * 64, "settings": {"tcp_port": 5000}}
+            ],
         }
     }
     api.config_manager.save_to_file.return_value = True
@@ -1616,15 +1635,27 @@ def test_identity_endpoints_paths(cherrypy_ctx):
     assert api.create_identity()["success"] is False
     request.json = {"name": "x", "type": "invalid"}
     assert api.create_identity()["success"] is False
-    request.json = {"name": "x", "type": "room_server", "settings": {"admin_password": "p", "guest_password": "p"}}
+    request.json = {
+        "name": "x",
+        "type": "room_server",
+        "settings": {"admin_password": "p", "guest_password": "p"},
+    }
     assert api.create_identity()["success"] is False
     request.json = {"name": "comp1", "type": "companion", "identity_key": "aa" * 32}
     assert api.create_identity()["success"] is False
 
-    request.json = {"name": "new-comp", "type": "companion", "identity_key": "cc" * 32, "settings": {"node_name": "N"}}
+    request.json = {
+        "name": "new-comp",
+        "type": "companion",
+        "identity_key": "cc" * 32,
+        "settings": {"node_name": "N"},
+    }
     api.event_loop = object()
     api.daemon_instance = SimpleNamespace(add_companion_from_config=MagicMock())
-    with patch("asyncio.run_coroutine_threadsafe", return_value=SimpleNamespace(result=lambda timeout: True)):
+    with patch(
+        "asyncio.run_coroutine_threadsafe",
+        return_value=SimpleNamespace(result=lambda timeout: True),
+    ):
         created = api.create_identity()
     assert created["success"] is True
 
@@ -1674,11 +1705,16 @@ def test_acl_endpoints_paths(cherrypy_ctx):
     login_helper = SimpleNamespace(get_acl_dict=lambda: {0x42: acl, 0x51: _FakeACL([])})
     id_mgr = SimpleNamespace(
         get_identities_by_type=lambda t: (
-            [("room1", _FakeIdentityObj(0x42), {})] if t == "room_server" else [("comp1", _FakeIdentityObj(0x51), {})]
+            [("room1", _FakeIdentityObj(0x42), {})]
+            if t == "room_server"
+            else [("comp1", _FakeIdentityObj(0x51), {})]
         )
     )
     local = _FakeIdentityObj(0x42)
-    frame_server = SimpleNamespace(companion_hash="0x51", _client_writer=SimpleNamespace(get_extra_info=lambda k: ("10.0.0.2", 1234)))
+    frame_server = SimpleNamespace(
+        companion_hash="0x51",
+        _client_writer=SimpleNamespace(get_extra_info=lambda k: ("10.0.0.2", 1234)),
+    )
     api.daemon_instance = SimpleNamespace(
         login_helper=login_helper,
         identity_manager=id_mgr,
@@ -1727,14 +1763,37 @@ def test_room_endpoint_slice(cherrypy_ctx):
     request.method = "GET"
     db = SimpleNamespace(
         get_room_message_count=MagicMock(return_value=1),
-        get_room_messages=MagicMock(return_value=[{"id": 1, "author_pubkey": "aa" * 32, "post_timestamp": 1.0, "sender_timestamp": 1, "message_text": "m", "txt_type": 0}]),
+        get_room_messages=MagicMock(
+            return_value=[
+                {
+                    "id": 1,
+                    "author_pubkey": "aa" * 32,
+                    "post_timestamp": 1.0,
+                    "sender_timestamp": 1,
+                    "message_text": "m",
+                    "txt_type": 0,
+                }
+            ]
+        ),
         get_messages_since=MagicMock(return_value=[]),
         delete_room_message=MagicMock(return_value=True),
         clear_room_messages=MagicMock(return_value=1),
         get_all_room_clients=MagicMock(return_value=[]),
     )
-    room = SimpleNamespace(db=db, max_posts=10, _running=True, next_push_time=0, last_cleanup_time=0)
-    with patch.object(api, "_get_room_server_by_name_or_hash", return_value={"room_server": room, "name": "room", "hash": 0x42, "identity": None, "config": {}}):
+    room = SimpleNamespace(
+        db=db, max_posts=10, _running=True, next_push_time=0, last_cleanup_time=0
+    )
+    with patch.object(
+        api,
+        "_get_room_server_by_name_or_hash",
+        return_value={
+            "room_server": room,
+            "name": "room",
+            "hash": 0x42,
+            "identity": None,
+            "config": {},
+        },
+    ):
         _attach_storage(api, SimpleNamespace(get_node_name_by_pubkey=lambda _pk: "Node"))
         msgs = api.room_messages(room_name="room")
         assert msgs["success"] is True

@@ -53,9 +53,11 @@ async def test_path_helper_updates_client_out_path_on_valid_decrypt():
     helper = PathHelper(acl_dict={0x11: acl})
 
     # Payload: dest(0x11), src(0x22), mac+data...
-    packet = _PathPacket(payload=b"\x11\x22\xAA\xBB\xCC")
+    packet = _PathPacket(payload=b"\x11\x22\xaa\xbb\xcc")
 
-    with patch("pymc_core.protocol.crypto.CryptoUtils.mac_then_decrypt", return_value=b"\x02\x99\x88\x01"):
+    with patch(
+        "pymc_core.protocol.crypto.CryptoUtils.mac_then_decrypt", return_value=b"\x02\x99\x88\x01"
+    ):
         handled = await helper.process_path_packet(packet)
 
     assert handled is False
@@ -71,14 +73,17 @@ async def test_path_helper_returns_false_for_non_matching_or_invalid_inputs():
     helper = PathHelper(acl_dict={0x11: acl})
 
     assert await helper.process_path_packet(_PathPacket(payload=b"\x11")) is False
-    assert await helper.process_path_packet(_PathPacket(payload=b"\x33\x22\xAA\xBB")) is False
+    assert await helper.process_path_packet(_PathPacket(payload=b"\x33\x22\xaa\xbb")) is False
 
     no_secret_client = _FakeClient(pubkey=bytes([0x22]) + b"x" * 31, shared_secret=b"")
     helper_no_secret = PathHelper(acl_dict={0x11: _FakeACL([no_secret_client])})
-    assert await helper_no_secret.process_path_packet(_PathPacket(payload=b"\x11\x22\xAA\xBB")) is False
+    assert (
+        await helper_no_secret.process_path_packet(_PathPacket(payload=b"\x11\x22\xaa\xbb"))
+        is False
+    )
 
     with patch("pymc_core.protocol.crypto.CryptoUtils.mac_then_decrypt", return_value=None):
-        assert await helper.process_path_packet(_PathPacket(payload=b"\x11\x22\xAA\xBB")) is False
+        assert await helper.process_path_packet(_PathPacket(payload=b"\x11\x22\xaa\xbb")) is False
 
 
 @pytest.mark.asyncio
@@ -173,9 +178,24 @@ def test_protocol_request_access_list_admin_and_reserved_rules():
 
 def test_protocol_request_get_neighbours_sort_and_pagination():
     neighbors = {
-        "AA" * 16: {"is_repeater": True, "zero_hop": True, "last_seen": time.time() - 1, "snr": 5.0},
-        "BB" * 16: {"is_repeater": True, "zero_hop": True, "last_seen": time.time() - 10, "snr": 1.0},
-        "CC" * 16: {"is_repeater": False, "zero_hop": True, "last_seen": time.time() - 1, "snr": 9.0},
+        "AA" * 16: {
+            "is_repeater": True,
+            "zero_hop": True,
+            "last_seen": time.time() - 1,
+            "snr": 5.0,
+        },
+        "BB" * 16: {
+            "is_repeater": True,
+            "zero_hop": True,
+            "last_seen": time.time() - 10,
+            "snr": 1.0,
+        },
+        "CC" * 16: {
+            "is_repeater": False,
+            "zero_hop": True,
+            "last_seen": time.time() - 1,
+            "snr": 9.0,
+        },
     }
     storage = SimpleNamespace(get_neighbors=lambda: neighbors)
     helper = ProtocolRequestHelper(
@@ -209,10 +229,16 @@ def test_protocol_request_owner_info_fallback_version():
 
 
 def test_text_helper_cli_prefix_and_admin_permission_checks():
-    acl = _FakeACL([
-        _FakeClient(pubkey=bytes([0x21]) + b"x" * 31, shared_secret=b"k" * 32, permissions=0x02),
-        _FakeClient(pubkey=bytes([0x22]) + b"x" * 31, shared_secret=b"k" * 32, permissions=0x01),
-    ])
+    acl = _FakeACL(
+        [
+            _FakeClient(
+                pubkey=bytes([0x21]) + b"x" * 31, shared_secret=b"k" * 32, permissions=0x02
+            ),
+            _FakeClient(
+                pubkey=bytes([0x22]) + b"x" * 31, shared_secret=b"k" * 32, permissions=0x01
+            ),
+        ]
+    )
     helper = TextHelper(identity_manager=MagicMock(), acl_dict={0x41: acl})
 
     assert helper._is_cli_command("get status") is True
@@ -301,11 +327,16 @@ def test_text_helper_register_identity_room_server_without_event_loop_is_safe():
     with (
         patch("repeater.handler_helpers.text.TextMessageHandler", return_value=MagicMock()),
         patch("repeater.handler_helpers.text.RoomServer") as room_server_cls,
-        patch("repeater.handler_helpers.text.asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+        patch(
+            "repeater.handler_helpers.text.asyncio.get_running_loop",
+            side_effect=RuntimeError("no loop"),
+        ),
     ):
         room_server_obj = MagicMock()
         room_server_cls.return_value = room_server_obj
-        helper.register_identity("room-a", identity, identity_type="room_server", radio_config={"max_posts": 2})
+        helper.register_identity(
+            "room-a", identity, identity_type="room_server", radio_config={"max_posts": 2}
+        )
 
     assert 0x34 in helper.room_servers
 
@@ -313,7 +344,9 @@ def test_text_helper_register_identity_room_server_without_event_loop_is_safe():
 @pytest.mark.asyncio
 async def test_text_helper_send_cli_reply_uses_direct_path_from_client():
     helper = TextHelper(identity_manager=MagicMock(), packet_injector=AsyncMock())
-    sender = _FakeClient(pubkey=bytes([0x99]) + b"x" * 31, shared_secret=b"s" * 32, permissions=0x02)
+    sender = _FakeClient(
+        pubkey=bytes([0x99]) + b"x" * 31, shared_secret=b"s" * 32, permissions=0x02
+    )
     sender.out_path = bytearray([0xAA, 0xBB])
     sender.out_path_len = 2
     helper.acl_dict = {0x10: _FakeACL([sender])}
@@ -332,6 +365,6 @@ async def test_text_helper_send_cli_reply_uses_direct_path_from_client():
             handler_info={"identity": _FakeId(bytes([0x10]) + b"i" * 31)},
         )
 
-    assert bytes(reply_packet.path) == b"\xAA\xBB"
+    assert bytes(reply_packet.path) == b"\xaa\xbb"
     assert reply_packet.path_len == 2
     helper._send_packet.assert_awaited_once_with(reply_packet, wait_for_ack=False)

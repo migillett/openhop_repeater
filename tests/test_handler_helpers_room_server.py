@@ -122,7 +122,7 @@ async def test_room_server_push_post_to_client_success_direct_route_sets_path_an
     rs.global_limiter = SimpleNamespace(acquire=AsyncMock(), release=MagicMock())
     rs._handle_ack_received = AsyncMock()
 
-    client = _FakeClient(pubkey=b"E" * 32, out_path=b"\xAA\xBB", out_path_len=2)
+    client = _FakeClient(pubkey=b"E" * 32, out_path=b"\xaa\xbb", out_path_len=2)
     post = {
         "author_pubkey": (b"F" * 32).hex(),
         "message_text": "payload",
@@ -131,17 +131,28 @@ async def test_room_server_push_post_to_client_success_direct_route_sets_path_an
 
     packet = SimpleNamespace(path=bytearray(), path_len=0)
     with (
-        patch("repeater.handler_helpers.room_server.PacketBuilder._pack_timestamp_data", return_value=b"pk"),
-        patch("repeater.handler_helpers.room_server.CryptoUtils.sha256", return_value=b"\x01\x02\x03\x04abcd"),
-        patch("repeater.handler_helpers.room_server.PacketBuilder.create_datagram", return_value=packet),
+        patch(
+            "repeater.handler_helpers.room_server.PacketBuilder._pack_timestamp_data",
+            return_value=b"pk",
+        ),
+        patch(
+            "repeater.handler_helpers.room_server.CryptoUtils.sha256",
+            return_value=b"\x01\x02\x03\x04abcd",
+        ),
+        patch(
+            "repeater.handler_helpers.room_server.PacketBuilder.create_datagram",
+            return_value=packet,
+        ),
     ):
         ok = await rs.push_post_to_client(client, post)
 
     assert ok is True
-    assert bytes(packet.path) == b"\xAA\xBB"
+    assert bytes(packet.path) == b"\xaa\xbb"
     assert packet.path_len == 2
     injector.assert_awaited_once_with(packet, wait_for_ack=True)
-    rs._handle_ack_received.assert_awaited_once_with(client.id.get_public_key(), post["post_timestamp"])
+    rs._handle_ack_received.assert_awaited_once_with(
+        client.id.get_public_key(), post["post_timestamp"]
+    )
     rs.global_limiter.release.assert_called_once()
 
 
@@ -169,9 +180,18 @@ async def test_room_server_push_post_to_client_backoff_skip_and_timeout_path():
     # Out of backoff and send fails -> timeout handler called.
     db.get_client_sync.return_value = {"push_failures": 1, "updated_at": time.time() - 9999}
     with (
-        patch("repeater.handler_helpers.room_server.PacketBuilder._pack_timestamp_data", return_value=b"pk"),
-        patch("repeater.handler_helpers.room_server.CryptoUtils.sha256", return_value=b"\x01\x02\x03\x04abcd"),
-        patch("repeater.handler_helpers.room_server.PacketBuilder.create_datagram", return_value=SimpleNamespace(path=bytearray(), path_len=0)),
+        patch(
+            "repeater.handler_helpers.room_server.PacketBuilder._pack_timestamp_data",
+            return_value=b"pk",
+        ),
+        patch(
+            "repeater.handler_helpers.room_server.CryptoUtils.sha256",
+            return_value=b"\x01\x02\x03\x04abcd",
+        ),
+        patch(
+            "repeater.handler_helpers.room_server.PacketBuilder.create_datagram",
+            return_value=SimpleNamespace(path=bytearray(), path_len=0),
+        ),
     ):
         fail_ok = await rs.push_post_to_client(client, post)
 

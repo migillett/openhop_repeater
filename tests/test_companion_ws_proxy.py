@@ -110,7 +110,11 @@ def test_resolve_tcp_endpoint_paths(monkeypatch):
 
     # daemon with empty bridges
     daemon = SimpleNamespace(
-        identity_manager=SimpleNamespace(get_identities_by_type=lambda _t: [("c1", SimpleNamespace(get_public_key=lambda: b"\x01"), {})]),
+        identity_manager=SimpleNamespace(
+            get_identities_by_type=lambda _t: [
+                ("c1", SimpleNamespace(get_public_key=lambda: b"\x01"), {})
+            ]
+        ),
         companion_bridges={},
         config={"identities": {"companions": []}},
     )
@@ -119,9 +123,19 @@ def test_resolve_tcp_endpoint_paths(monkeypatch):
 
     # found in identity+bridge and in config, bind 0.0.0.0 => loopback
     daemon = SimpleNamespace(
-        identity_manager=SimpleNamespace(get_identities_by_type=lambda _t: [("c1", SimpleNamespace(get_public_key=lambda: b"\x01"), {})]),
+        identity_manager=SimpleNamespace(
+            get_identities_by_type=lambda _t: [
+                ("c1", SimpleNamespace(get_public_key=lambda: b"\x01"), {})
+            ]
+        ),
         companion_bridges={1: object()},
-        config={"identities": {"companions": [{"name": "c1", "settings": {"tcp_port": 6000, "bind_address": "0.0.0.0"}}]}},
+        config={
+            "identities": {
+                "companions": [
+                    {"name": "c1", "settings": {"tcp_port": 6000, "bind_address": "0.0.0.0"}}
+                ]
+            }
+        },
     )
     proxy.set_daemon(daemon)
     assert ws._resolve_tcp_endpoint("c1") == ("127.0.0.1", 6000)
@@ -166,7 +180,9 @@ def test_tcp_to_ws_and_teardown():
     ws2._companion_name = "c2"
     tcp_ref = MagicMock()
     ws2._tcp = tcp_ref
-    ws2._teardown = proxy.CompanionFrameWebSocket._teardown.__get__(ws2, proxy.CompanionFrameWebSocket)
+    ws2._teardown = proxy.CompanionFrameWebSocket._teardown.__get__(
+        ws2, proxy.CompanionFrameWebSocket
+    )
     ws2._teardown()
     tcp_ref.close.assert_called_once()
     ws2.close.assert_called_once()

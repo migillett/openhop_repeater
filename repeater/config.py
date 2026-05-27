@@ -51,9 +51,7 @@ def resolve_storage_dir(
 ) -> Path:
 
     storage_dir_cfg = (
-        config.get("storage", {}).get("storage_dir")
-        or config.get("storage_dir")
-        or default
+        config.get("storage", {}).get("storage_dir") or config.get("storage_dir") or default
     )
 
     storage_dir = Path(str(storage_dir_cfg)).expanduser()
@@ -70,10 +68,10 @@ def resolve_storage_dir(
 def get_node_info(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     Extract node name, radio configuration, and MQTT settings from config.
-    
+
     Args:
         config: Configuration dictionary
-        
+
     Returns:
         Dictionary with node_name, radio_config, and MQTT configuration
     """
@@ -87,10 +85,10 @@ def get_node_info(config: Dict[str, Any]) -> Dict[str, Any]:
     radio_freq_mhz = radio_freq / 1_000_000
     radio_bw_khz = radio_bw / 1_000
     radio_config_str = f"{radio_freq_mhz},{radio_bw_khz},{radio_sf},{radio_cr}"
-    
+
     # Handle getting the config from mqtt brokers, falling back to letsmesh if it doesn't exist
     mqtt_config = config.get("mqtt_brokers", config.get("letsmesh", {}))
-    
+
     return {
         "node_name": node_name,
         "radio_config": radio_config_str,
@@ -143,7 +141,7 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             "inform_interval_seconds": 30,
             "request_timeout_seconds": 10,
             "verify_tls": True,
-            "api_token": "",
+            "api_token": None,
             "cert_store_dir": "/etc/pymc_repeater/glass",
         }
 
@@ -184,14 +182,14 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     if "security" not in config["repeater"]:
         logger.warning(
             "No 'security' section found under 'repeater' in config. "
-            "Adding defaults — please review and update passwords."
+            "Adding secure placeholders — complete setup wizard before login."
         )
         config["repeater"]["security"] = {
             "max_clients": 1,
-            "admin_password": "admin123",
-            "guest_password": "guest123",
+            "admin_password": None,
+            "guest_password": None,
             "allow_read_only": False,
-            "jwt_secret": "",
+            "jwt_secret": None,
             "jwt_expiry_minutes": 60,
         }
 
@@ -215,17 +213,17 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
 def save_config(config_data: Dict[str, Any], config_path: Optional[str] = None) -> bool:
     """
     Save configuration to YAML file.
-    
+
     Args:
         config_data: Configuration dictionary to save
         config_path: Path to config file (uses default if None)
-        
+
     Returns:
         True if successful, False otherwise
     """
     if config_path is None:
         config_path = os.getenv("PYMC_REPEATER_CONFIG", "/etc/pymc_repeater/config.yaml")
-    
+
     try:
         # Create backup of existing config
         config_file = Path(config_path)
@@ -247,7 +245,7 @@ def save_config(config_data: Dict[str, Any], config_path: Optional[str] = None) 
 
         logger.info(f"Saved configuration to {config_path}")
         return True
-        
+
     except Exception as e:
         logger.error(f"Failed to save configuration: {e}")
         return False
@@ -256,29 +254,29 @@ def save_config(config_data: Dict[str, Any], config_path: Optional[str] = None) 
 def update_unscoped_flood_policy(allow: bool, config_path: Optional[str] = None) -> bool:
     """
     Update the unscoped flood policy in the configuration.
-    
+
     Args:
         allow: True to allow unscoped flooding, False to deny
         config_path: Path to config file (uses default if None)
-        
+
     Returns:
         True if successful, False otherwise
     """
     try:
         # Load current config
         config = load_config(config_path)
-        
+
         # Ensure mesh section exists
         if "mesh" not in config:
             config["mesh"] = {}
-        
+
         # Set global flood policy
         config["mesh"]["global_flood_allow"] = allow
         config["mesh"]["unscoped_flood_allow"] = allow
-        
+
         # Save updated config
         return save_config(config, config_path)
-        
+
     except Exception as e:
         logger.error(f"Failed to update unscoped flood policy: {e}")
         return False
@@ -345,7 +343,7 @@ def get_radio_for_board(board_config: dict):
         if isinstance(value, int):
             return value
         if isinstance(value, str):
-            return int(value.strip().rstrip(','), 0)
+            return int(value.strip().rstrip(","), 0)
         raise ValueError(f"Invalid int value type: {type(value)}")
 
     def _parse_int_list(value):
@@ -517,9 +515,7 @@ def get_radio_for_board(board_config: dict):
 
         host = tcp_cfg.get("host")
         if not host:
-            raise ValueError(
-                "Missing 'host' in 'pymc_tcp' section (modem hostname or LAN IP)"
-            )
+            raise ValueError("Missing 'host' in 'pymc_tcp' section (modem hostname or LAN IP)")
 
         radio_cfg = board_config.get("radio") or {}
         radio = TCPLoRaRadio(
@@ -563,9 +559,7 @@ def get_radio_for_board(board_config: dict):
 
         port = usb_cfg.get("port")
         if not port:
-            raise ValueError(
-                "Missing 'port' in 'pymc_usb' section (e.g. /dev/ttyACM0)"
-            )
+            raise ValueError("Missing 'port' in 'pymc_usb' section (e.g. /dev/ttyACM0)")
 
         radio_cfg = board_config.get("radio") or {}
         radio = USBLoRaRadio(

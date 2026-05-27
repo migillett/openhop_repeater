@@ -134,9 +134,12 @@ async def test_frame_server_persistence_paths_and_stop():
         get_channel=lambda idx: None,
     )
 
-    with patch("repeater.companion.frame_server._BaseFrameServer.__init__", lambda self, **kwargs: None), patch(
-        "repeater.companion.frame_server._BaseFrameServer.stop", AsyncMock()
-    ) as base_stop:
+    with (
+        patch(
+            "repeater.companion.frame_server._BaseFrameServer.__init__", lambda self, **kwargs: None
+        ),
+        patch("repeater.companion.frame_server._BaseFrameServer.stop", AsyncMock()) as base_stop,
+    ):
         srv = CompanionFrameServer(bridge=bridge, companion_hash="h", sqlite_handler=sqlite)
         srv.bridge = bridge
         srv.companion_hash = "h"
@@ -171,7 +174,9 @@ async def test_frame_server_persistence_paths_and_stop():
         sqlite.companion_upsert_contact.assert_called_once()
 
         bridge.get_contacts = lambda: [contact]
-        bridge.get_channel = lambda idx: (SimpleNamespace(name="c1", secret="s") if idx == 1 else None)
+        bridge.get_channel = lambda idx: (
+            SimpleNamespace(name="c1", secret="s") if idx == 1 else None
+        )
         await srv.stop()
 
         sqlite.companion_save_contacts.assert_called_once()
@@ -185,7 +190,9 @@ async def test_frame_server_persistence_paths_and_stop():
 async def test_frame_server_no_more_messages_response_when_empty():
     bridge = SimpleNamespace(sync_next_message=lambda: None)
 
-    with patch("repeater.companion.frame_server._BaseFrameServer.__init__", lambda self, **kwargs: None):
+    with patch(
+        "repeater.companion.frame_server._BaseFrameServer.__init__", lambda self, **kwargs: None
+    ):
         srv = CompanionFrameServer(bridge=bridge, companion_hash="h", sqlite_handler=None)
         srv.bridge = bridge
         srv._write_frame = MagicMock()

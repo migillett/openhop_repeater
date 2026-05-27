@@ -23,7 +23,7 @@ repos:
 
   # Modern Python linting + import sorting + formatting
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.11.13
+    rev: v0.15.14
     hooks:
       - id: ruff-check
         args: ["--fix"]
@@ -31,3 +31,24 @@ repos:
       - id: ruff-format
         args: ["--check"]
         files: ^.*\.py$
+
+  # Security-focused static analysis
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.9
+    hooks:
+      - id: bandit
+        # B104: intentional LAN listeners, B105: setup-required placeholder credentials.
+        args: ["-q", "-l", "-i", "-s", "B104,B105"]
+        files: ^.*\.py$
+        exclude: ^tests/
+
+  # Test suite gate
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest
+        entry: python -m pytest -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        types: [python]
