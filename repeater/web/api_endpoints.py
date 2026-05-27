@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import time
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -5250,7 +5250,7 @@ class APIEndpoints:
             exported = _sanitize(exported)
 
             meta = {
-                "exported_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                "exported_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "version": __version__,
                 "config_path": self._config_path,
                 "includes_secrets": full_backup,

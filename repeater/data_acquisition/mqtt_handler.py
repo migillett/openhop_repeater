@@ -4,18 +4,11 @@ import json
 import logging
 import string
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 import paho.mqtt.client as mqtt
 from nacl.signing import SigningKey
-
-# Try to import datetime.UTC (Python 3.11+) otherwise fallback to timezone.utc
-try:
-    from datetime import UTC
-except Exception:
-    from datetime import timezone
-    UTC = timezone.utc
 
 from repeater import __version__, config
 from repeater.presets import get_preset
@@ -268,7 +261,7 @@ class _BrokerConnection:
 
     def _generate_jwt(self) -> str:
         """Generate MeshCore-style Ed25519 JWT token"""
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
 
         header = {"alg": "Ed25519", "typ": "JWT"}
 
@@ -448,7 +441,7 @@ class _BrokerConnection:
             else:
                 logger.info(f"No credentials set for {self.broker['name']} (JWT auth disabled and no username/password provided)")
             
-            self._connect_time = datetime.now(UTC)
+            self._connect_time = datetime.now(timezone.utc)
             
         except Exception as e:
             logger.error(f"Failed to set JWT credentials for {self.broker['name']}: {e}")
@@ -550,7 +543,7 @@ class _BrokerConnection:
         """Check if connection should be reconnected due to JWT expiry (at 80% of lifetime)"""
         if not self._connect_time:
             return False
-        elapsed = (datetime.now(UTC) - self._connect_time).total_seconds()
+        elapsed = (datetime.now(timezone.utc) - self._connect_time).total_seconds()
         expiry_seconds = self.jwt_expiry_minutes * 60
         # Stagger refresh by 5% per broker to prevent simultaneous disconnects
         # Broker 0: 80%, Broker 1: 85%, Broker 2: 90%, etc.
@@ -906,7 +899,7 @@ class MeshCoreToMqttPusher:
     # Packet helpers
     # ----------------------------------------------------------------
     def _process_packet(self, pkt: dict) -> dict:
-        return {"timestamp": datetime.now(UTC).isoformat(), "origin_id": self.public_key, **pkt}
+        return {"timestamp": datetime.now(timezone.utc).isoformat(), "origin_id": self.public_key, **pkt}
 
     def publish_packet(self, pkt: dict, subtopic="packets", retain=False):
         return self.publish(subtopic, self._process_packet(pkt), retain)
@@ -941,7 +934,7 @@ class MeshCoreToMqttPusher:
 
         status = {
             "status": state,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "origin": origin or self.node_name,
             "origin_id": self.public_key,
             "model": "PyMC-Repeater",
