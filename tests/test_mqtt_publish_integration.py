@@ -11,7 +11,6 @@ to end. paho-mqtt's network layer is mocked so no real broker is required.
 """
 
 import json
-import math
 from unittest.mock import MagicMock
 
 from repeater.airtime import AirtimeManager

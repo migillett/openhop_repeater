@@ -13,11 +13,9 @@ objects to verify:
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from pymc_core.protocol import Packet, PathUtils
 from pymc_core.protocol.constants import (
-    MAX_PATH_SIZE,
     ROUTE_TYPE_FLOOD,
     ROUTE_TYPE_TRANSPORT_FLOOD,
 )

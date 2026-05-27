@@ -12,7 +12,6 @@ rather than mocking the protocol layer. Covers:
   - Max-hop boundary enforcement per hash size
 """
 import struct
-from collections import OrderedDict
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -23,7 +22,6 @@ from pymc_core.protocol.constants import (
     PATH_HASH_COUNT_MASK,
     PATH_HASH_SIZE_SHIFT,
     PAYLOAD_TYPE_TRACE,
-    PH_TYPE_SHIFT,
     ROUTE_TYPE_DIRECT,
     ROUTE_TYPE_FLOOD,
 )

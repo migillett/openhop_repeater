@@ -2,7 +2,6 @@ import io
 import logging
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import cherrypy
 import pytest

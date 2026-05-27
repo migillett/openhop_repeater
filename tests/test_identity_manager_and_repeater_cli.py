@@ -1,7 +1,5 @@
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from repeater.handler_helpers.repeater_cli import MeshCLI, RepeaterCLI
 from repeater.identity_manager import IdentityManager

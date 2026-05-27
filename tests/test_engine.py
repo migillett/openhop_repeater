@@ -7,11 +7,7 @@ airtime duty-cycle, TX mode (forward/monitor/no_tx), and config reloading.
 """
 import asyncio
 import base64
-import copy
-import math
 import time
-from collections import OrderedDict
-from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest

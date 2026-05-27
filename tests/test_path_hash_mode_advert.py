@@ -5,7 +5,6 @@ When mesh.path_hash_mode is 1 or 2, flood 0-hop packets (e.g. adverts) sent via
 dispatcher.send_packet() must have path_len encoding set so get_path_hash_size()
 returns 2 or 3. The dispatcher applies this in send_packet() before transmit.
 """
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 

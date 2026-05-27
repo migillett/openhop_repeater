@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from repeater.handler_helpers.mesh_cli import MeshCLI
 
