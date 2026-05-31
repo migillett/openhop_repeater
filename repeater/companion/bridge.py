@@ -18,6 +18,24 @@ from pymc_core.companion import CompanionBridge
 logger = logging.getLogger("RepeaterCompanionBridge")
 
 
+def _prefs_bytes_from_json(value: Any) -> bytes:
+    """Restore a ``bytes`` NodePrefs field from JSON (hex string from :func:`_to_json_safe`)."""
+    if value is None:
+        return b""
+    if isinstance(value, (bytes, bytearray)):
+        return bytes(value)
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return b""
+        try:
+            return bytes.fromhex(s)
+        except ValueError:
+            logger.debug("Invalid hex for prefs bytes field (prefix %r)", s[:32])
+            return b""
+    return b""
+
+
 def _to_json_safe(value: Any) -> Any:
     """Convert a value to a JSON-serializable form (avoids TypeError from enums, bytes, etc.)."""
     if value is None or isinstance(value, (bool, int, float, str)):
@@ -70,8 +88,6 @@ class RepeaterCompanionBridge(CompanionBridge):
             authenticate_callback=authenticate_callback,
             initial_contacts=initial_contacts,
         )
-        # Load persisted prefs (e.g. node_name) from SQLite so matching uses last-saved name
-        self._load_prefs()
 
     def _save_prefs(self) -> None:
         """Persist full NodePrefs as JSON to SQLite."""
@@ -103,6 +119,9 @@ class RepeaterCompanionBridge(CompanionBridge):
                 current = getattr(self.prefs, key)
                 try:
                     if value is None:
+                        continue
+                    if isinstance(current, bytes):
+                        setattr(self.prefs, key, _prefs_bytes_from_json(value))
                         continue
                     if isinstance(current, bool):
                         setattr(self.prefs, key, bool(value))
