@@ -1,0 +1,1 @@
+import{t as e}from"./dataService-BNBF0B_a.js";export{e as useDataService};
