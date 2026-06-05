@@ -92,7 +92,7 @@ class RepeaterHandler(BaseHandler):
                 "spreading_factor": getattr(radio, "spreading_factor", 8),
                 "bandwidth": getattr(radio, "bandwidth", 125000),
                 "coding_rate": getattr(radio, "coding_rate", 8),
-                "preamble_length": getattr(radio, "preamble_length", 17),
+                "preamble_length": getattr(radio, "preamble_length", 32),
                 "frequency": getattr(radio, "frequency", 915000000),
                 "tx_power": getattr(radio, "tx_power", 14),
             }

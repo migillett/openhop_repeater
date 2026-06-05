@@ -541,6 +541,7 @@ def get_radio_for_board(board_config: dict):
             "spreading_factor": int(radio_cfg.get("spreading_factor", 8)),
             "coding_rate": int(radio_cfg.get("coding_rate", 8)),
             "tx_power": int(radio_cfg.get("tx_power", 14)),
+            "preamble_length": int(radio_cfg.get("preamble_length", 32)),
         }
         radio = KissModemWrapper(
             port=port,

@@ -374,7 +374,7 @@ radio:
   coding_rate: 8
 
   # Preamble length in symbols
-  preamble_length: 17
+  preamble_length: 32
 
   # Use implicit header mode
   implicit_header: false

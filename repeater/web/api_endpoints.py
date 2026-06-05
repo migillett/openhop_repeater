@@ -1220,7 +1220,7 @@ class APIEndpoints:
                     tx_power_preset if tx_power_preset is not None else 14
                 )
                 if "preamble_length" not in config_yaml["radio"]:
-                    config_yaml["radio"]["preamble_length"] = 17
+                    config_yaml["radio"]["preamble_length"] = 32
             elif hardware_key == "pymc_usb":
                 # pymc_usb modem: external SX1262 board over USB-CDC.
                 # Accept pymc_usb_port / pymc_usb_baudrate from the request body
@@ -1240,7 +1240,7 @@ class APIEndpoints:
                 elif "tx_power" in hw_config:
                     config_yaml["radio"]["tx_power"] = hw_config.get("tx_power", 22)
                 if "preamble_length" in hw_config:
-                    config_yaml["radio"]["preamble_length"] = hw_config.get("preamble_length", 16)
+                    config_yaml["radio"]["preamble_length"] = hw_config.get("preamble_length", 32)
             elif hardware_key == "pymc_tcp":
                 # pymc_tcp modem: external SX1262 board exposed as TCP over Wi-Fi/Ethernet.
                 # 'host' has no sensible default — must be the modem's LAN address or
@@ -1267,7 +1267,7 @@ class APIEndpoints:
                 elif "tx_power" in hw_config:
                     config_yaml["radio"]["tx_power"] = hw_config.get("tx_power", 22)
                 if "preamble_length" in hw_config:
-                    config_yaml["radio"]["preamble_length"] = hw_config.get("preamble_length", 16)
+                    config_yaml["radio"]["preamble_length"] = hw_config.get("preamble_length", 32)
             else:
                 # SX1262 / sx1262_ch341: radio_type and optional CH341 from hw_config
                 if "radio_type" in hw_config:
@@ -1293,7 +1293,7 @@ class APIEndpoints:
                 elif "tx_power" in hw_config:
                     config_yaml["radio"]["tx_power"] = hw_config.get("tx_power", 22)
                 if "preamble_length" in hw_config:
-                    config_yaml["radio"]["preamble_length"] = hw_config.get("preamble_length", 17)
+                    config_yaml["radio"]["preamble_length"] = hw_config.get("preamble_length", 32)
 
                 if "sx1262" not in config_yaml:
                     config_yaml["sx1262"] = {}
