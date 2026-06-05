@@ -21,10 +21,10 @@ website: "https://meshmapper.net"
 brokers:
   - name: "MeshMapper"
     enabled: true
-    host: mqtt.meshmapper.cc
+    host: mqtt.meshmapper.net
     port: 443
     transport: "websockets"
-    audience: "mqtt.meshmapper.cc"
+    audience: "mqtt.meshmapper.net"
     use_jwt_auth: true
     format: letsmesh
     retain_status: false
