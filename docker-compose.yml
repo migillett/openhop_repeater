@@ -1,26 +1,26 @@
 services:
   pymc-repeater:
-    build:
-      context: .
-      args:
-        PUID: ${PUID:-1000}
-        PGID: ${PGID:-1000}
+    image: ${PYMC_REPEATER_IMAGE:-pymcdev/pymc-repeater:main}
     container_name: pymc-repeater
     restart: unless-stopped
     ports:
       - 8000:8000
     devices:
-      # SPI DEVICES (Your path may differ)
+      # SPI devices. Your paths may differ. Remove if not using SPI hardware.
       - /dev/spidev0.0
       - /dev/gpiochip0
-      # USB DEVICES (Your path may differ)
-      - /dev/bus/usb/002:/dev/bus/usb/002
-    # SPI DEVICES PERMISSIONS
+      # USB devices. Uncomment/change only if needed.
+      # - /dev/bus/usb/002:/dev/bus/usb/002
     cap_add:
       - SYS_RAWIO
-    # USB DEVICSE PERMISSIONS
     group_add:
-     - plugdev
+      - "${GPIO_GID:-986}"
+      - "${SPI_GID:-989}"
+      - plugdev
     volumes:
-      - ./config:/etc/pymc_repeater
-      - ./data:/var/lib/pymc_repeater
+      - ${PYMC_CONFIG_VOLUME:-pymc-repeater-config}:/etc/pymc_repeater
+      - ${PYMC_DATA_VOLUME:-pymc-repeater-data}:/var/lib/pymc_repeater
+
+volumes:
+  pymc-repeater-config:
+  pymc-repeater-data:

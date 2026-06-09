@@ -18,9 +18,13 @@ integrations.
 - [Policy Engine](#policy-engine)
 - [Upgrading](#upgrading)
 - [Proxmox LXC Installation](#proxmox-lxc-installation)
+- [Uninstallation](#uninstallation)
 - [Docker Compose](#docker-compose)
+- [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [Support](#support)
+- [Disclaimer](#disclaimer)
+- [License](#license)
 
 ## Overview
 
@@ -388,21 +392,36 @@ The script prompts before each optional removal step.
 
 ## Docker Compose
 
-You can run pyMC Repeater in Docker using the published image:
+You can run pyMC Repeater in Docker using the published image.
 
-```yaml
-image: ${PYMC_REPEATER_IMAGE:-pymcdev/pymc-repeater:main}
+Copy `.env.example` to `.env` before starting:
+
+```bash
+cp .env.example .env
 ```
+
+Set `GPIO_GID` and `SPI_GID` from `getent group gpio` and `getent group spi`
+if your host values are different.
+
+Default storage should use Docker named volumes. This avoids Portainer creating
+root-owned `./config` and `./data` bind mount folders on first start. If you
+want host bind mounts, use absolute host paths and pre-create/chown them to
+`15888:15888`.
+
+Do not mount `./config.yaml:/etc/pymc_repeater/config.yaml`; Docker can create
+that source as a directory, which breaks startup.
 
 ### Setup
 
-1. Configure `docker-compose.yml` for your hardware and device paths.
-2. Comment out or remove device mappings that do not apply to your hardware.
-3. Pull and start the container.
+1. Copy `.env.example` to `.env`.
+2. Review `.env` and update `PYMC_REPEATER_IMAGE`, `GPIO_GID`, or `SPI_GID`
+   if needed.
+3. Configure `docker-compose.yml` for your hardware and device paths.
+4. Uncomment the USB device mapping only if your host has that device path.
+5. Pull and start the container.
 
 ```bash
-docker compose pull
-docker compose up -d --force-recreate
+docker compose up -d
 ```
 
 ### Example `docker-compose.yml`
@@ -410,29 +429,35 @@ docker compose up -d --force-recreate
 ```yaml
 services:
   pymc-repeater:
-    image: pymcdev/pymc-repeater:main
+    image: ${PYMC_REPEATER_IMAGE:-pymcdev/pymc-repeater:main}
     container_name: pymc-repeater
     restart: unless-stopped
     ports:
       - 8000:8000
 
     devices:
-      # SPI devices. Your paths may differ.
+      # SPI devices. Your paths may differ. Remove if not using SPI hardware.
       - /dev/spidev0.0
       - /dev/gpiochip0
 
-      # USB devices. Your paths may differ.
-      - /dev/bus/usb/002:/dev/bus/usb/002
+      # USB devices. Uncomment/change only if needed.
+      # - /dev/bus/usb/002:/dev/bus/usb/002
 
     cap_add:
       - SYS_RAWIO
 
     group_add:
+      - "${GPIO_GID:-986}"
+      - "${SPI_GID:-989}"
       - plugdev
 
     volumes:
-      - ./config:/etc/pymc_repeater
-      - ./data:/var/lib/pymc_repeater
+      - ${PYMC_CONFIG_VOLUME:-pymc-repeater-config}:/etc/pymc_repeater
+      - ${PYMC_DATA_VOLUME:-pymc-repeater-data}:/var/lib/pymc_repeater
+
+volumes:
+  pymc-repeater-config:
+  pymc-repeater-data:
 ```
 
 ## Roadmap

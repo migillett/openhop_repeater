@@ -51,6 +51,7 @@ htmlcov/
 *~
 
 # Config
+.env
 config.yaml
 config.yaml.backup
 identity.json
