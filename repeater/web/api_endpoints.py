@@ -2521,7 +2521,6 @@ class APIEndpoints:
                             "timestamp": datetime.now().isoformat(),
                             "level": "INFO",
                             "logger": "HTTPServer",
-                            "raw_message": "No logs available",
                         }
                     ]
                 )

@@ -24,6 +24,29 @@ def test_log_buffer_emit_collects_messages():
     assert "warn" in buf.logs[-1]["message"]
 
 
+def test_log_buffer_emit_redacts_sensitive_values():
+    buf = hs.LogBuffer(max_lines=5)
+    rec = logging.LogRecord(
+        "auth",
+        logging.DEBUG,
+        __file__,
+        10,
+        "auth password=secret123 token=abc123 Authorization: Bearer deadbeef",
+        (),
+        None,
+    )
+
+    buf.emit(rec)
+
+    assert len(buf.logs) == 1
+    entry = buf.logs[0]
+    assert "secret123" not in entry["message"]
+    assert "abc123" not in entry["message"]
+    assert "deadbeef" not in entry["message"]
+    assert "[REDACTED]" in entry["message"]
+    assert "raw_message" not in entry
+
+
 def test_doc_endpoint_routes_and_openapi_json_paths(monkeypatch):
     api = SimpleNamespace(docs=lambda: "docs-html")
     doc = hs.DocEndpoint(api)

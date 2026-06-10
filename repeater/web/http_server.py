@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import queue
+import re
 import secrets
 import threading
 from collections import deque
@@ -42,6 +43,13 @@ logger = logging.getLogger("HTTPServer")
 
 # In-memory log buffer
 class LogBuffer(logging.Handler):
+    _SECRET_PATTERNS = (
+        re.compile(
+            r"(?i)\b(admin_password|guest_password|password|passwd|api[_-]?key|token|jwt_secret)\b(\s*[:=]\s*)(['\"]?)([^,'\"\s]+)(['\"]?)"
+        ),
+        re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._-]+"),
+    )
+
     def __init__(self, max_lines=100):
         super().__init__()
         self.logs = deque(maxlen=max_lines)
@@ -50,17 +58,34 @@ class LogBuffer(logging.Handler):
         self._subscribers = []
         self.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
 
+    @classmethod
+    def _sanitize_log_text(cls, text: str) -> str:
+        if not text:
+            return ""
+
+        sanitized = text
+
+        def _replace_secret(match: re.Match) -> str:
+            key = match.group(1)
+            sep = match.group(2)
+            quote_start = match.group(3) or ""
+            quote_end = match.group(5) or quote_start
+            return f"{key}{sep}{quote_start}[REDACTED]{quote_end}"
+
+        sanitized = cls._SECRET_PATTERNS[0].sub(_replace_secret, sanitized)
+        sanitized = cls._SECRET_PATTERNS[1].sub("Bearer [REDACTED]", sanitized)
+        return sanitized
+
     def emit(self, record):
 
         try:
-            formatted_message = self.format(record)
+            formatted_message = self._sanitize_log_text(self.format(record))
             entry = {
                 "id": self._next_log_id(),
                 "message": formatted_message,
                 "timestamp": datetime.fromtimestamp(record.created).isoformat(),
                 "level": record.levelname,
                 "logger": record.name,
-                "raw_message": record.getMessage(),
                 "module": record.module,
                 "pathname": record.pathname,
                 "line": record.lineno,
