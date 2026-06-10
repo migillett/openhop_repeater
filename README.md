@@ -400,8 +400,8 @@ Copy `.env.example` to `.env` before starting:
 cp .env.example .env
 ```
 
-Set `GPIO_GID` and `SPI_GID` from `getent group gpio` and `getent group spi`
-if your host values are different.
+Set `DIALOUT_GID`, `GPIO_GID`, and `SPI_GID` from `getent group dialout`,
+`getent group gpio`, and `getent group spi` if your host values are different.
 
 Default storage should use Docker named volumes. This avoids Portainer creating
 root-owned `./config` and `./data` bind mount folders on first start. If you
@@ -414,8 +414,8 @@ that source as a directory, which breaks startup.
 ### Setup
 
 1. Copy `.env.example` to `.env`.
-2. Review `.env` and update `PYMC_REPEATER_IMAGE`, `GPIO_GID`, or `SPI_GID`
-   if needed.
+2. Review `.env` and update `PYMC_REPEATER_IMAGE`, `DIALOUT_GID`,
+   `GPIO_GID`, or `SPI_GID` if needed.
 3. Configure `docker-compose.yml` for your hardware and device paths.
 4. Uncomment the USB device mapping only if your host has that device path.
 5. Pull and start the container.
@@ -447,6 +447,7 @@ services:
       - SYS_RAWIO
 
     group_add:
+      - "${DIALOUT_GID:-20}"
       - "${GPIO_GID:-986}"
       - "${SPI_GID:-989}"
       - plugdev

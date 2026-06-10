@@ -5,6 +5,7 @@ ARG USER=repeater
 ARG GROUP=repeater
 ARG PUID=15888
 ARG PGID=15888
+ARG DIALOUT_GID=20
 ARG GPIO_GID=986
 ARG SPI_GID=989
 ARG TARGETARCH
@@ -19,6 +20,7 @@ ENV INSTALL_DIR=/opt/pymc_repeater \
     SETUPTOOLS_SCM_PRETEND_VERSION_FOR_PYMC_REPEATER=${PACKAGE_VERSION} \
     PUID=${PUID} \
     PGID=${PGID} \
+    DIALOUT_GID=${DIALOUT_GID} \
     GPIO_GID=${GPIO_GID} \
     SPI_GID=${SPI_GID}
 
@@ -49,10 +51,11 @@ RUN arch="${TARGETARCH:-}" \
 
 # Create the group and user in order to run without root privileges
 RUN groupadd --gid "$PGID" "$GROUP" \
+    && (getent group dialout >/dev/null || groupadd --gid "$DIALOUT_GID" dialout) \
     && groupadd --gid "$GPIO_GID" gpio \
     && groupadd --gid "$SPI_GID" spi \
     && useradd --uid "$PUID" --gid "$PGID" --home-dir "$HOME_DIR" --create-home --shell /usr/bin/bash "$USER" \
-    && usermod -a -G gpio,spi "$USER"
+    && usermod -a -G dialout,gpio,spi "$USER"
 
 # Create runtime directories
 RUN mkdir -p ${INSTALL_DIR} ${CONFIG_DIR} ${DATA_DIR} \
