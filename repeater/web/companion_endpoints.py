@@ -17,7 +17,10 @@ from typing import Optional
 import cherrypy
 from pymc_core.companion.constants import DEFAULT_OFFLINE_QUEUE_SIZE
 
-from repeater.companion.utils import validate_companion_node_name
+from repeater.companion.utils import (
+    trim_companion_contacts_to_fit,
+    validate_companion_node_name,
+)
 
 from .auth.middleware import require_auth
 
@@ -395,8 +398,11 @@ class CompanionAPIEndpoints:
             if limit < 1:
                 raise cherrypy.HTTPError(400, "limit must be a positive integer")
         bridge = self._get_bridge(**self._resolve_bridge_params(body))
+        # max_contacts lives on the ContactStore, not the bridge itself; reading it
+        # from bridge.contacts avoids silently falling back to the 1000 default for
+        # companions configured with a higher limit.
+        max_contacts = bridge.contacts.max_contacts
         if limit is not None:
-            max_contacts = getattr(bridge, "max_contacts", 1000)
             limit = min(limit, max_contacts)
         companion_hash = getattr(bridge, "_companion_hash", None)
         if not companion_hash:
@@ -408,6 +414,18 @@ class CompanionAPIEndpoints:
             hours=hours,
             limit=limit,
         )
+        # The bulk import writes directly to SQLite, bypassing the ContactStore cap
+        # that every other path honors. Trim favourite-aware (oldest non-favourites
+        # first) so persisted contacts never exceed max_contacts.
+        try:
+            removed = trim_companion_contacts_to_fit(
+                sqlite_handler, companion_hash, max_contacts
+            )
+        except ValueError as exc:
+            raise cherrypy.HTTPError(
+                409,
+                f"Cannot trim imported contacts to fit max_contacts={max_contacts}: {exc}",
+            )
         contact_rows = sqlite_handler.companion_load_contacts(companion_hash)
         if contact_rows:
             records = []
@@ -416,7 +434,7 @@ class CompanionAPIEndpoints:
                 d["public_key"] = d.pop("pubkey", d.get("public_key", b""))
                 records.append(d)
             bridge.contacts.load_from_dicts(records)
-        return self._success({"imported": count})
+        return self._success({"imported": count, "removed": removed})
 
     # ----- Channels -----
 
