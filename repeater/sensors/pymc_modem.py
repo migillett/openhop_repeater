@@ -19,6 +19,7 @@ class PymcModemSensor(SensorBase):
 
     def __init__(self, name: str, config: Optional[Dict[str, Any]] = None, log=None):
         super().__init__(name=name, config=config, log=log)
+        self.poll_interval_seconds = float(self.settings.get("poll_interval_seconds", 60.0))
         self.timeout_seconds = float(self.settings.get("timeout_seconds", 2.0))
         self.endpoint = str(self.settings.get("endpoint", "/api/stats") or "/api/stats")
         self.url = self._build_url()

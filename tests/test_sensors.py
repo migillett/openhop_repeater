@@ -108,12 +108,17 @@ def test_sensor_manager_summary_reflects_sensor_config():
     assert summary["loaded"] == 1
 
 
-def test_sensor_manager_default_poll_interval_is_sixty_seconds():
-    config = {"sensors": {"enabled": True, "definitions": []}}
+def test_pymc_modem_sensor_defaults_to_sixty_second_poll_interval():
+    sensor = PymcModemSensor("modem", {"settings": {"host": "192.168.0.205"}})
 
-    manager = SensorManager(config, registry=_TestRegistry)
+    assert sensor.poll_interval_seconds == 60.0
 
-    assert manager.get_summary()["poll_interval_seconds"] == 60.0
+
+def test_sensor_manager_uses_sensor_specific_poll_interval():
+    sensor = _DummySensor("demo", {"settings": {"value": 7}})
+    setattr(sensor, "poll_interval_seconds", 60.0)
+
+    assert SensorManager._sensor_poll_interval(sensor, 10.0) == 60.0
 
 
 def test_sensor_manager_loads_and_reads_sensors_without_stopping_on_failure():
