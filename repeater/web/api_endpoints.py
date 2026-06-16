@@ -1342,6 +1342,12 @@ class APIEndpoints:
                     config_yaml["sx1262"]["use_dio2_rf"] = hw_config.get("use_dio2_rf", False)
                 if "is_waveshare" in hw_config:
                     config_yaml["sx1262"]["is_waveshare"] = hw_config.get("is_waveshare", False)
+                if "gpio_chip" in hw_config:
+                    config_yaml["sx1262"]["gpio_chip"] = hw_config.get("gpio_chip", 0)
+                if "use_gpiod_backend" in hw_config:
+                    config_yaml["sx1262"]["use_gpiod_backend"] = hw_config.get(
+                        "use_gpiod_backend", False
+                    )
             # Write updated config
             with open(self._config_path, "w") as f:
                 yaml.dump(config_yaml, f, default_flow_style=False, sort_keys=False)
