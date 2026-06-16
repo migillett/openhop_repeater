@@ -225,6 +225,7 @@ def test_pymc_modem_sensor_reads_modem_stats(monkeypatch):
     assert reading["data"]["satellites_in_view"] == 14
     assert reading["data"]["datetime_utc"] == "2026-06-14T18:25:30+00:00"
     assert reading["data"]["battery_voltage_mv"] == 4112
+    assert reading["data"]["battery_percent"] == 93
 
 
 def test_pymc_modem_sensor_accepts_stats_without_gps_coordinates(monkeypatch):
@@ -264,6 +265,7 @@ def test_pymc_modem_sensor_accepts_stats_without_gps_coordinates(monkeypatch):
     assert reading["data"]["source"] == "pymc_modem"
     assert reading["data"]["battery_voltage_mv"] == 3681
     assert reading["data"]["battery_voltage_v"] == 3.681
+    assert reading["data"]["battery_percent"] == 37
     assert reading["data"]["solar_charge_rate_percent_per_hour"] == 9.568
     assert reading["data"]["gps_enabled"] is True
     assert reading["data"]["gps_seen"] is False

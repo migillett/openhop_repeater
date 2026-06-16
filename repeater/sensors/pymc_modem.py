@@ -11,6 +11,23 @@ from .base import SensorBase
 from .registry import SensorRegistry
 
 
+def _single_cell_voltage_to_percent(voltage_v: float) -> int:
+    """Piecewise linear SoC estimate for a single Li-ion/LiPo cell."""
+    if voltage_v >= 4.20:
+        return 100
+    if voltage_v >= 4.00:
+        return int(85 + (voltage_v - 4.00) / 0.20 * 15)
+    if voltage_v >= 3.80:
+        return int(60 + (voltage_v - 3.80) / 0.20 * 25)
+    if voltage_v >= 3.70:
+        return int(40 + (voltage_v - 3.70) / 0.10 * 20)
+    if voltage_v >= 3.50:
+        return int(15 + (voltage_v - 3.50) / 0.20 * 25)
+    if voltage_v >= 3.00:
+        return int((voltage_v - 3.00) / 0.50 * 15)
+    return 0
+
+
 @SensorRegistry.register("pymc_modem")
 class PymcModemSensor(SensorBase):
     """Read diagnostics exposed by a pyMC modem HTTP API."""
@@ -126,12 +143,28 @@ class PymcModemSensor(SensorBase):
         for key in (
             "battery_voltage_mv",
             "battery_voltage_v",
+            "battery_percent",
+            "battery_percentage",
             "solar_charge_rate_percent_per_hour",
         ):
             if key in payload:
                 out[key] = payload[key]
 
+        if "battery_percent" not in out:
+            battery_voltage_v = self._battery_voltage_v(payload)
+            if battery_voltage_v is not None:
+                out["battery_percent"] = _single_cell_voltage_to_percent(battery_voltage_v)
+
         return {key: value for key, value in out.items() if value is not None}
+
+    def _battery_voltage_v(self, payload: Dict[str, Any]) -> Optional[float]:
+        voltage_v = self._float(payload.get("battery_voltage_v"))
+        if voltage_v is not None:
+            return voltage_v
+        voltage_mv = self._float(payload.get("battery_voltage_mv"))
+        if voltage_mv is not None:
+            return voltage_mv / 1000.0
+        return None
 
     @staticmethod
     def _first_dict(*values: Any) -> Dict[str, Any]:
