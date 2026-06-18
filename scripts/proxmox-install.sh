@@ -3,15 +3,15 @@
 # Creates an LXC container with USB passthrough and installs pyMC Repeater
 #
 # Usage (run on the Proxmox host):
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/rightup/pyMC_Repeater/main/scripts/proxmox-install.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/pyMC-dev/pyMC_Repeater/main/scripts/proxmox-install.sh)"
 #
 # License: MIT
-# Source: https://github.com/rightup/pyMC_Repeater
+# Source: https://github.com/pyMC-dev/pyMC_Repeater
 
 set -euo pipefail
 
 # ── Defaults ───────────────────────────────────────────────────────────────
-REPO="https://github.com/rightup/pyMC_Repeater.git"
+REPO="https://github.com/pyMC-dev/pyMC_Repeater.git"
 BRANCH="dev"
 CT_TEMPLATE="debian-12-standard"
 CT_RAM=1024
@@ -79,11 +79,27 @@ else
     msg_warn "CH341 USB device not found — plug it in before starting the repeater"
 fi
 
+# Default to the next available container ID, but allow the user to choose.
+DEFAULT_CTID=$(pvesh get /cluster/nextid)
+
 # ── Interactive settings ──────────────────────────────────────────────────
 echo ""
 echo -e "${BLD}Container Settings${CL} (press Enter for defaults):"
 echo ""
 
+while true; do
+    read -p "  Container ID [${DEFAULT_CTID}]: " -r input
+    CTID="${input:-$DEFAULT_CTID}"
+    if [[ ! "$CTID" =~ ^[0-9]+$ ]]; then
+        msg_warn "Container ID must be a number"
+        continue
+    fi
+    if pct status "$CTID" &>/dev/null; then
+        msg_warn "Container ID ${CTID} already exists"
+        continue
+    fi
+    break
+done
 read -p "  Hostname [${CT_HOSTNAME}]: " -r input; CT_HOSTNAME="${input:-$CT_HOSTNAME}"
 read -p "  RAM in MB [${CT_RAM}]: " -r input; CT_RAM="${input:-$CT_RAM}"
 read -p "  Disk in GB [${CT_DISK}]: " -r input; CT_DISK="${input:-$CT_DISK}"
@@ -96,9 +112,6 @@ read -p "  Storage [${CT_STORAGE}]: " -r input; CT_STORAGE="${input:-$CT_STORAGE
 read -p "  Git branch [${BRANCH}]: " -r input; BRANCH="${input:-$BRANCH}"
 read -sp "  Root password [pymc]: " CT_PASSWORD; echo
 CT_PASSWORD="${CT_PASSWORD:-pymc}"
-
-# ── Get next CTID ─────────────────────────────────────────────────────────
-CTID=$(pvesh get /cluster/nextid)
 
 # ── Confirmation ──────────────────────────────────────────────────────────
 echo ""
@@ -177,7 +190,7 @@ pct exec "$CTID" -- bash -c "
     locale-gen >/dev/null 2>&1
     echo 'LANG=en_US.UTF-8' > /etc/default/locale
 
-    apt-get install -y git whiptail >/dev/null 2>&1
+    apt-get install -y curl git whiptail >/dev/null 2>&1
 
     # Enable auto-login on console (no password prompt in Proxmox web console)
     mkdir -p /etc/systemd/system/container-getty@1.service.d
@@ -197,7 +210,7 @@ OS=\$(. /etc/os-release && echo \"\$NAME\")
 VER=\$(. /etc/os-release && echo \"\$VERSION_ID\")
 echo \"\"
 echo \"    pyMC Repeater LXC Container\"
-echo \"    🌐  GitHub: https://github.com/rightup/pyMC_Repeater\"
+echo \"    🌐  GitHub: https://github.com/pyMC-dev/pyMC_Repeater\"
 echo \"\"
 echo \"    🖥️   OS: \$OS - Version: \$VER\"
 echo \"    🏠  Hostname: \$HOSTNAME\"
@@ -209,7 +222,7 @@ echo \"\"
 MOTD
     chmod +x /etc/profile.d/pymc-motd.sh
 "
-msg_ok "Git installed, locale fixed, console auto-login enabled"
+msg_ok "curl/git installed, locale fixed, console auto-login enabled"
 
 msg_info "Cloning pyMC_Repeater (branch: ${BRANCH})..."
 pct exec "$CTID" -- bash -c "git clone --branch ${BRANCH} ${REPO} /root/pyMC_Repeater"

@@ -111,7 +111,7 @@ sudo apt install git -y
 ### Clone The Repository
 
 ```bash
-git clone https://github.com/rightup/pyMC_Repeater.git
+git clone https://github.com/pyMC-dev/pyMC_Repeater.git
 cd pyMC_Repeater
 ```
 
@@ -295,12 +295,13 @@ Hardware, choose one:
 Run this command on the Proxmox host, not inside a container:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/rightup/pyMC_Repeater/main/scripts/proxmox-install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/pyMC-dev/pyMC_Repeater/main/scripts/proxmox-install.sh)"
 ```
 
 Replace `main` in the URL with another branch name if needed.
 
-The installer will prompt for container settings and then:
+The installer will prompt for container settings (container ID, hostname, RAM,
+disk, bridge, etc.) and then:
 
 1. Download a Debian 12 LXC template.
 2. Create a privileged container with USB passthrough.
@@ -313,6 +314,7 @@ The installer will prompt for container settings and then:
 
 | Setting | Default |
 |---------|---------|
+| Container ID | Next available |
 | Hostname | `pymc-repeater` |
 | RAM | 1024 MB |
 | Disk | 4 GB |
