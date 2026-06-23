@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -16,6 +17,7 @@ from repeater.sensors import waveshare_ups_e as waveshare_ups_e_module
 from repeater.sensors.ens210 import ENS210Sensor
 from repeater.sensors.ina219 import INA219Sensor
 from repeater.sensors.lafvin_ups_3s import LafvinUps3sSensor
+from repeater.sensors.pymc_modem import PymcModemSensor
 from repeater.sensors.shtc3 import SHTC3Sensor
 from repeater.sensors.waveshare_ups_d import WaveshareUpsDSensor
 from repeater.sensors.waveshare_ups_e import WaveshareUpsESensor
@@ -106,6 +108,19 @@ def test_sensor_manager_summary_reflects_sensor_config():
     assert summary["loaded"] == 1
 
 
+def test_pymc_modem_sensor_defaults_to_sixty_second_poll_interval():
+    sensor = PymcModemSensor("modem", {"settings": {"host": "192.168.0.205"}})
+
+    assert sensor.poll_interval_seconds == 60.0
+
+
+def test_sensor_manager_uses_sensor_specific_poll_interval():
+    sensor = _DummySensor("demo", {"settings": {"value": 7}})
+    setattr(sensor, "poll_interval_seconds", 60.0)
+
+    assert SensorManager._sensor_poll_interval(sensor, 10.0) == 60.0
+
+
 def test_sensor_manager_loads_and_reads_sensors_without_stopping_on_failure():
     config = {
         "sensors": {
@@ -143,6 +158,120 @@ def test_hardware_stats_sensor_reads_from_collector(monkeypatch):
 
     assert reading["ok"] is True
     assert reading["data"] == {"cpu": {"usage_percent": 42.0}}
+
+
+def test_pymc_modem_sensor_reads_modem_stats(monkeypatch):
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "battery_voltage_mv": 4112,
+                    "battery_voltage_v": 4.112,
+                    "gps": {
+                        "fix": {"valid": True, "quality": 1},
+                        "position": {
+                            "latitude": 42.360082,
+                            "longitude": -71.05888,
+                            "altitude_m": 12.5,
+                        },
+                        "satellites": {"used_count": 9, "in_view_count": 14},
+                        "time": {"datetime_utc": "2026-06-14T18:25:30+00:00"},
+                    },
+                }
+            ).encode()
+
+    captured = {}
+
+    def _urlopen(request, timeout=None):
+        captured["url"] = request.full_url
+        captured["auth"] = request.headers.get("Authorization")
+        captured["timeout"] = timeout
+        return _Response()
+
+    import repeater.sensors.pymc_modem as pymc_modem_module
+
+    monkeypatch.setattr(pymc_modem_module.urllib.request, "urlopen", _urlopen)
+
+    reading = PymcModemSensor(
+        "modem",
+        {
+            "settings": {
+                "host": "192.168.0.205",
+                "password": "secret-token",
+                "timeout_seconds": 3.5,
+            }
+        },
+    ).read()
+
+    assert reading["ok"] is True
+    assert captured["url"] == "http://192.168.0.205/api/stats"
+    assert captured["auth"].startswith("Basic ")
+    assert captured["timeout"] == 3.5
+    assert reading["data"]["source"] == "pymc_modem"
+    assert reading["data"]["latitude"] == 42.360082
+    assert reading["data"]["longitude"] == -71.05888
+    assert reading["data"]["altitude_m"] == 12.5
+    assert reading["data"]["fix_valid"] is True
+    assert reading["data"]["fix_quality"] == 1
+    assert reading["data"]["satellites_used"] == 9
+    assert reading["data"]["satellites_in_view"] == 14
+    assert reading["data"]["datetime_utc"] == "2026-06-14T18:25:30+00:00"
+    assert reading["data"]["battery_voltage_mv"] == 4112
+    assert reading["data"]["battery_percent"] == 93
+
+
+def test_pymc_modem_sensor_accepts_stats_without_gps_coordinates(monkeypatch):
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "battery_voltage_mv": 3681,
+                    "battery_voltage_v": 3.681,
+                    "solar_charge_rate_percent_per_hour": 9.568,
+                    "gps": {"enabled": True, "seen": False, "fix": {"valid": False}},
+                }
+            ).encode("utf-8")
+
+    import repeater.sensors.pymc_modem as pymc_modem_module
+
+    monkeypatch.setattr(
+        pymc_modem_module.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _Response(),
+    )
+
+    reading = PymcModemSensor(
+        "modem",
+        {"settings": {"base_url": "http://pymc-modem.local"}},
+    ).read()
+
+    assert reading["ok"] is True
+    assert reading["data"]["source"] == "pymc_modem"
+    assert reading["data"]["battery_voltage_mv"] == 3681
+    assert reading["data"]["battery_voltage_v"] == 3.681
+    assert reading["data"]["battery_percent"] == 37
+    assert reading["data"]["solar_charge_rate_percent_per_hour"] == 9.568
+    assert reading["data"]["gps_enabled"] is True
+    assert reading["data"]["gps_seen"] is False
+    assert reading["data"]["fix_valid"] is False
+    assert reading["data"].get("latitude") is None
+    assert reading["data"].get("longitude") is None
 
 
 def test_ina219_sensor_reads_voltage_current_and_power(monkeypatch):

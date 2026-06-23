@@ -14,11 +14,15 @@ import logging
 import math
 import threading
 import time
+import urllib.error
+import urllib.request
+from base64 import b64encode
 from collections import Counter, deque
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
+from urllib.parse import urlparse
 
 logger = logging.getLogger("GPSService")
 
@@ -58,6 +62,20 @@ def _to_int(value: Any) -> Optional[int]:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _to_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on"}:
+            return True
+        if lowered in {"0", "false", "no", "off"}:
+            return False
+    return bool(value)
 
 
 def _is_valid_latitude(value: Optional[float]) -> bool:
@@ -263,6 +281,116 @@ class NMEAParser:
     def ingest_many(self, lines: Iterable[str]):
         for line in lines:
             self.ingest_sentence(line)
+
+    def ingest_modem_payload(self, payload: Dict[str, Any]) -> bool:
+        """Ingest a generic pyMC modem HTTP GPS payload.
+
+        This is for modems that expose parsed GPS JSON instead of raw NMEA.
+        The payload may be the whole /api/stats response or the nested gps dict.
+        """
+        if not isinstance(payload, dict):
+            return False
+
+        gps = payload.get("gps") if isinstance(payload.get("gps"), dict) else payload
+        position = self._first_dict(
+            gps.get("position"),
+            gps.get("gps_position"),
+            gps.get("location"),
+            payload.get("position"),
+        )
+        fix = self._first_dict(gps.get("fix"), payload.get("fix"))
+        satellites = self._first_dict(gps.get("satellites"), payload.get("satellites"))
+        time_data = self._first_dict(
+            gps.get("time"), gps.get("time_data"), payload.get("time_data")
+        )
+        motion = self._first_dict(gps.get("motion"), payload.get("motion"))
+
+        latitude = _to_float(position.get("latitude"))
+        longitude = _to_float(position.get("longitude"))
+        fix_valid = _to_bool(fix.get("valid", gps.get("fix_valid")))
+        if fix_valid is None:
+            fix_valid = _is_valid_latitude(latitude) and _is_valid_longitude(longitude)
+
+        with self._lock:
+            now = time.time()
+            self.last_update = now
+            self.last_error = None
+            self.nmea["last_sentence"] = None
+            self.nmea["last_sentence_type"] = "MODEM_HTTP"
+            self.nmea["last_talker"] = "MODEM"
+            self.nmea["seen_sentence_types"] = ["MODEM_HTTP"]
+            self._sentence_counters["MODEM_HTTP"] += 1
+            self.nmea["sentence_counters"] = dict(self._sentence_counters)
+
+            if latitude is not None:
+                self.position["latitude"] = latitude
+            if longitude is not None:
+                self.position["longitude"] = longitude
+            altitude = _to_float(position.get("altitude_m"))
+            if altitude is not None:
+                self.position["altitude_m"] = altitude
+
+            self.fix["valid"] = bool(fix_valid)
+            quality = _to_int(fix.get("quality", gps.get("fix_quality")))
+            if quality is not None:
+                self.fix["quality"] = quality
+                self.fix["quality_label"] = FIX_QUALITY_LABELS.get(quality, f"quality {quality}")
+            elif fix_valid:
+                self.fix["quality_label"] = "modem valid"
+
+            used = _to_int(satellites.get("used_count", satellites.get("satellites_used")))
+            if used is not None:
+                self.satellites["used_count"] = used
+            in_view = _to_int(satellites.get("in_view_count", satellites.get("satellites_in_view")))
+            if in_view is not None:
+                self.satellites["in_view_count"] = in_view
+            satellite_details = satellites.get("in_view")
+            if isinstance(satellite_details, list):
+                normalized = []
+                for satellite in satellite_details:
+                    if not isinstance(satellite, dict):
+                        continue
+                    prn = satellite.get("prn", satellite.get("id"))
+                    if prn in (None, ""):
+                        continue
+                    normalized.append(
+                        {
+                            "prn": str(prn),
+                            "elevation_degrees": _to_int(
+                                satellite.get("elevation_degrees", satellite.get("elevation"))
+                            ),
+                            "azimuth_degrees": _to_int(
+                                satellite.get("azimuth_degrees", satellite.get("azimuth"))
+                            ),
+                            "snr_db": _to_float(satellite.get("snr_db", satellite.get("snr"))),
+                        }
+                    )
+                self.satellites["in_view"] = normalized
+
+            for key in ("datetime_utc", "utc_time", "date"):
+                value = time_data.get(key) or payload.get(key)
+                if value:
+                    self.time_data[key] = str(value)
+
+            speed_kmh = _to_float(motion.get("speed_kmh", payload.get("speed_kmh")))
+            if speed_kmh is not None:
+                self.motion["speed_kmh"] = speed_kmh
+                self.motion["speed_knots"] = round(speed_kmh / 1.852, 3)
+            course = _to_float(motion.get("course_degrees", payload.get("course_degrees")))
+            if course is not None:
+                self.motion["course_degrees"] = course
+
+            self.raw_attributes["MODEM_HTTP"] = {
+                "gps_enabled": gps.get("enabled"),
+                "gps_seen": gps.get("seen"),
+                "battery_voltage_mv": payload.get("battery_voltage_mv"),
+                "battery_voltage_v": payload.get("battery_voltage_v"),
+                "solar_charge_rate_percent_per_hour": payload.get(
+                    "solar_charge_rate_percent_per_hour"
+                ),
+            }
+            self._refresh_derived_unlocked()
+            return True
 
     def ingest_sentence(self, sentence: str) -> bool:
         parsed = self._split_sentence(sentence)
@@ -513,6 +641,13 @@ class NMEAParser:
     def _field(fields: List[str], index: int) -> str:
         return fields[index] if index < len(fields) else ""
 
+    @staticmethod
+    def _first_dict(*values: Any) -> Dict[str, Any]:
+        for value in values:
+            if isinstance(value, dict):
+                return value
+        return {}
+
     def _normalize_raw_attributes_unlocked(self):
         if self._unhandled_sentence_types:
             self.raw_attributes["unhandled_sentence_types"] = sorted(self._unhandled_sentence_types)
@@ -617,6 +752,14 @@ class GPSService:
         self.reconnect_interval_seconds = float(gps_config.get("reconnect_interval_seconds", 5.0))
         self.poll_interval_seconds = float(gps_config.get("poll_interval_seconds", 2.0))
         self.source_path = gps_config.get("source_path") or gps_config.get("snapshot_path")
+        self.modem_http_host = str(gps_config.get("host", "") or "").strip()
+        self.modem_http_port = int(gps_config.get("port", 80))
+        self.modem_http_endpoint = str(gps_config.get("endpoint", "/api/stats") or "/api/stats")
+        if not self.modem_http_endpoint.startswith("/"):
+            self.modem_http_endpoint = "/" + self.modem_http_endpoint
+        self.modem_http_scheme = str(gps_config.get("scheme", "http") or "http").lower()
+        self.modem_http_username = str(gps_config.get("username", "admin") or "admin")
+        self.modem_http_password = gps_config.get("password")
         self.repeater_config = repeater_config
         self.time_sync_enabled = bool(gps_config.get("time_sync_enabled", True))
         self.time_sync_interval_seconds = max(
@@ -687,7 +830,12 @@ class GPSService:
         if self._thread and self._thread.is_alive():
             return
 
-        target = self._run_file_loop if self.source == "file" else self._run_serial_loop
+        if self.source == "file":
+            target = self._run_file_loop
+        elif self.source in ("modem_http", "pymc_modem", "http"):
+            target = self._run_modem_http_loop
+        else:
+            target = self._run_serial_loop
         self._stop_event.clear()
         self._thread = threading.Thread(target=target, name="gps-service", daemon=True)
         self._thread.start()
@@ -800,6 +948,15 @@ class GPSService:
                     "device": self.device if self.source == "serial" else None,
                     "baud_rate": self.baud_rate if self.source == "serial" else None,
                     "source_path": self.source_path if self.source == "file" else None,
+                    "host": self.modem_http_host
+                    if self.source in ("modem_http", "pymc_modem", "http")
+                    else None,
+                    "port": self.modem_http_port
+                    if self.source in ("modem_http", "pymc_modem", "http")
+                    else None,
+                    "endpoint": self.modem_http_endpoint
+                    if self.source in ("modem_http", "pymc_modem", "http")
+                    else None,
                     "read_timeout_seconds": self.read_timeout_seconds,
                     "poll_interval_seconds": self.poll_interval_seconds,
                     "stale_after_seconds": self.parser.stale_after_seconds,
@@ -1164,6 +1321,55 @@ class GPSService:
             self._stop_event.wait(self.poll_interval_seconds)
 
         self._running = False
+
+    def _run_modem_http_loop(self):
+        if not self.modem_http_host:
+            self._set_source_error("gps.host is required for modem_http source")
+            self._running = False
+            return
+
+        url = f"{self.modem_http_scheme}://{self.modem_http_host}:{self.modem_http_port}{self.modem_http_endpoint}"
+        if not self._is_safe_modem_http_url(url):
+            self._set_source_error(
+                "gps modem_http URL scheme must be http or https and include a host"
+            )
+            self._running = False
+            return
+
+        while not self._stop_event.is_set():
+            request = urllib.request.Request(url, headers={"Accept": "application/json"})
+            if self.modem_http_password not in (None, ""):
+                raw_auth = f"{self.modem_http_username}:{self.modem_http_password}".encode("utf-8")
+                request.add_header("Authorization", "Basic " + b64encode(raw_auth).decode("ascii"))
+
+            try:
+                with urllib.request.urlopen(request, timeout=self.read_timeout_seconds) as response:  # nosec B310
+                    status = int(getattr(response, "status", 200) or 200)
+                    body = response.read()
+                if status < 200 or status >= 300:
+                    raise RuntimeError(f"modem HTTP {status} reading {url}")
+                payload = json.loads(body.decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise RuntimeError("modem GPS response was not a JSON object")
+                if not self.parser.ingest_modem_payload(payload):
+                    raise RuntimeError("modem GPS response did not contain a usable GPS payload")
+                self._set_source_error(None)
+                self._maybe_sync_system_time()
+                self._maybe_update_repeater_location()
+            except urllib.error.HTTPError as exc:
+                self._set_source_error(f"modem HTTP {exc.code} reading {url}")
+            except urllib.error.URLError as exc:
+                self._set_source_error(f"modem GPS request failed: {exc.reason}")
+            except Exception as exc:
+                self._set_source_error(f"{type(exc).__name__}: {exc}")
+            self._stop_event.wait(self.poll_interval_seconds)
+
+        self._running = False
+
+    @staticmethod
+    def _is_safe_modem_http_url(url: str) -> bool:
+        parsed = urlparse(url)
+        return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
     @staticmethod
     def _extract_file_sentences(content: str) -> List[str]:

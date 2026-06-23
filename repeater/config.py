@@ -101,6 +101,41 @@ class NullRadio:
         return True
 
 
+class BaselineCrcCounterRadio:
+    """Radio proxy that exposes CRC errors relative to repeater startup.
+
+    pyMC modem transports report the modem firmware's cumulative CRC counter.
+    The SX1262 wrapper's counter starts at process startup, which lets the engine
+    persist deltas without knowing the radio backend. Mirror that wrapper flow
+    here by normalizing the modem's raw counter at the transport boundary.
+    """
+
+    def __init__(self, radio):
+        self._radio = radio
+        self._crc_baseline = self._read_raw_crc_count()
+
+    def __getattr__(self, name: str):
+        return getattr(self._radio, name)
+
+    @property
+    def crc_error_count(self) -> int:
+        current = self._read_raw_crc_count()
+        if self._crc_baseline <= 0 and current > 0:
+            self._crc_baseline = current
+            return 0
+        return max(0, current - self._crc_baseline)
+
+    @crc_error_count.setter
+    def crc_error_count(self, value: Any) -> None:
+        setattr(self._radio, "crc_error_count", value)
+
+    def _read_raw_crc_count(self) -> int:
+        try:
+            return int(getattr(self._radio, "crc_error_count", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+
 def resolve_storage_dir(
     config: Dict[str, Any],
     *,
@@ -214,6 +249,12 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
             "baud_rate": 9600,
             "read_timeout_seconds": 1.0,
             "reconnect_interval_seconds": 5.0,
+            "host": "",
+            "port": 80,
+            "endpoint": "/api/stats",
+            "scheme": "http",
+            "username": "admin",
+            "password": None,
             "stale_after_seconds": 10.0,
             "retain_sentences": 25,
             "validate_checksum": True,
@@ -612,7 +653,7 @@ def get_radio_for_board(board_config: dict):
         except Exception as e:
             raise RuntimeError(f"Failed to initialize pymc_tcp radio: {e}") from e
 
-        return radio
+        return BaselineCrcCounterRadio(radio)
 
     elif radio_type == "pymc_usb":
         try:
@@ -654,7 +695,7 @@ def get_radio_for_board(board_config: dict):
         except Exception as e:
             raise RuntimeError(f"Failed to initialize pymc_usb radio: {e}") from e
 
-        return radio
+        return BaselineCrcCounterRadio(radio)
 
     raise RuntimeError(
         f"Unknown radio type: {radio_type}. "

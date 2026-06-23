@@ -1,4 +1,5 @@
 import importlib.util
+import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -109,6 +110,107 @@ def test_gps_service_file_source_reads_nmea_lines(tmp_path):
     assert snapshot["position"]["latitude"] == 42.83538333
     assert snapshot["position"]["longitude"] == -71.1076
     assert snapshot["satellites"]["used_count"] == 5
+
+
+def test_gps_service_modem_http_source_reads_generic_modem_gps(monkeypatch):
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "battery_voltage_mv": 4112,
+                    "gps": {
+                        "fix": {"valid": True, "quality": 1},
+                        "position": {
+                            "latitude": 42.360082,
+                            "longitude": -71.05888,
+                            "altitude_m": 12.5,
+                        },
+                        "satellites": {
+                            "used_count": 9,
+                            "in_view_count": 14,
+                            "in_view": [
+                                {
+                                    "prn": "04",
+                                    "elevation_degrees": 77,
+                                    "azimuth_degrees": 45,
+                                    "snr_db": 42,
+                                },
+                                {
+                                    "prn": "05",
+                                    "elevation_degrees": 13,
+                                    "azimuth_degrees": 180,
+                                    "snr_db": 35,
+                                },
+                            ],
+                        },
+                        "time": {"datetime_utc": "2026-06-14T18:25:30+00:00"},
+                    },
+                }
+            ).encode("utf-8")
+
+    captured = {}
+
+    def _urlopen(request, timeout=None):
+        captured["url"] = request.full_url
+        captured["auth"] = request.headers.get("Authorization")
+        captured["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setattr(_MODULE.urllib.request, "urlopen", _urlopen)
+
+    service = GPSService(
+        {
+            "gps": {
+                "enabled": True,
+                "source": "modem_http",
+                "host": "192.168.30.114",
+                "port": 80,
+                "endpoint": "/api/stats",
+                "username": "admin",
+                "password": "password",
+                "read_timeout_seconds": 1.0,
+                "poll_interval_seconds": 0.05,
+                "stale_after_seconds": 5.0,
+                "time_sync_enabled": False,
+            }
+        }
+    )
+    service.start()
+    try:
+        deadline = time.time() + 1.0
+        snapshot = service.get_snapshot()
+        while snapshot["status"]["state"] == "no_data" and time.time() < deadline:
+            time.sleep(0.05)
+            snapshot = service.get_snapshot()
+    finally:
+        service.stop()
+
+    assert captured["url"] == "http://192.168.30.114:80/api/stats"
+    assert captured["auth"].startswith("Basic ")
+    assert captured["timeout"] == 1.0
+    assert snapshot["enabled"] is True
+    assert snapshot["source"]["type"] == "modem_http"
+    assert snapshot["status"]["state"] == "valid_fix"
+    assert snapshot["position"]["latitude"] == 42.360082
+    assert snapshot["position"]["longitude"] == -71.05888
+    assert snapshot["position"]["altitude_m"] == 12.5
+    assert snapshot["fix"]["quality"] == 1
+    assert snapshot["satellites"]["used_count"] == 9
+    assert snapshot["satellites"]["in_view_count"] == 14
+    assert snapshot["satellites"]["in_view"] == [
+        {"prn": "04", "elevation_degrees": 77, "azimuth_degrees": 45, "snr_db": 42.0},
+        {"prn": "05", "elevation_degrees": 13, "azimuth_degrees": 180, "snr_db": 35.0},
+    ]
+    assert snapshot["satellites"]["snr"] == {"min": 35.0, "max": 42.0, "avg": 38.5}
+    assert snapshot["time"]["datetime_utc"] == "2026-06-14T18:25:30+00:00"
 
 
 def test_rmc_only_fix_has_non_conflicting_quality_label():

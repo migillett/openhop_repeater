@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import logging
 import threading
+import time
 from typing import Any, Dict, List, Optional
 
 from .registry import SensorRegistry
@@ -112,21 +113,31 @@ class SensorManager:
     def read_all(self) -> List[Dict[str, Any]]:
         readings: List[Dict[str, Any]] = []
         for sensor in self.sensors:
-            try:
-                readings.append(sensor.read())
-            except Exception as exc:
-                self.log.warning("Sensor manager caught read error for %s: %s", sensor.name, exc)
-                readings.append(
-                    {
-                        "name": sensor.name,
-                        "type": getattr(sensor, "sensor_type", "sensor"),
-                        "ok": False,
-                        "timestamp": None,
-                        "data": {},
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-                )
+            readings.append(self._read_sensor(sensor))
         return readings
+
+    def _read_sensor(self, sensor) -> Dict[str, Any]:
+        try:
+            return sensor.read()
+        except Exception as exc:
+            self.log.warning("Sensor manager caught read error for %s: %s", sensor.name, exc)
+            return {
+                "name": sensor.name,
+                "type": getattr(sensor, "sensor_type", "sensor"),
+                "ok": False,
+                "timestamp": None,
+                "data": {},
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+    @staticmethod
+    def _sensor_poll_interval(sensor, default_interval: float) -> float:
+        raw = getattr(sensor, "poll_interval_seconds", default_interval)
+        try:
+            interval = float(raw)
+        except (TypeError, ValueError):
+            interval = default_interval
+        return max(0.1, interval)
 
     def _poll_loop(self) -> None:
         """Background thread: poll sensors at configured interval and cache readings."""
@@ -140,16 +151,35 @@ class SensorManager:
 
         self.log.debug("Sensor polling loop started (interval=%.1f sec)", poll_interval)
 
+        next_read_at: Dict[str, float] = {}
+        latest_by_name: Dict[str, Dict[str, Any]] = {}
+
         while not self._stop_event.is_set():
+            now = time.monotonic()
+            next_due_in = poll_interval
             try:
-                readings = self.read_all()
-                with self._readings_lock:
-                    self._latest_readings = readings
+                updated = False
+                for sensor in self.sensors:
+                    name = sensor.name
+                    interval = self._sensor_poll_interval(sensor, poll_interval)
+                    due_at = next_read_at.get(name, 0.0)
+                    if now >= due_at:
+                        latest_by_name[name] = self._read_sensor(sensor)
+                        next_read_at[name] = now + interval
+                        updated = True
+                    next_due_in = min(next_due_in, max(0.0, next_read_at[name] - now))
+
+                if updated:
+                    readings = [
+                        latest_by_name[s.name] for s in self.sensors if s.name in latest_by_name
+                    ]
+                    with self._readings_lock:
+                        self._latest_readings = readings
             except Exception as exc:
                 self.log.warning("Sensor poll cycle failed: %s", exc)
 
             # Wait for next poll or stop signal
-            self._stop_event.wait(poll_interval)
+            self._stop_event.wait(max(0.1, next_due_in))
 
         self.log.debug("Sensor polling loop stopped")
 
