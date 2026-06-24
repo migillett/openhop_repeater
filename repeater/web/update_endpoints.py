@@ -54,7 +54,6 @@ _SED_BIN = "/usr/bin/sed"
 _SYSTEMCTL_BIN = "/bin/systemctl"
 _SUDO_BIN = "/usr/bin/sudo"
 _INSTALL_DIR = "/opt/openhop_repeater"
-_LEGACY_INSTALL_DIR = "/opt/openhop-repeater"
 
 _github_ssl_ctx: Optional[ssl.SSLContext] = None
 _disk_version_mismatch_logged: Optional[tuple] = None
@@ -74,7 +73,6 @@ def _find_buildroot_upgrade_helper() -> Optional[str]:
     candidates = [
         "/root/openhop-repeater/buildroot-manage.sh",
         "/opt/openhop_repeater/openhop-repeater/buildroot-manage.sh",
-        "/opt/openhop-repeater/openhop-repeater/buildroot-manage.sh",
         "/root/scripts/buildroot-manage.sh",
     ]
     for path in candidates:
@@ -812,15 +810,6 @@ def _migrate_service_unit() -> None:
             check=False,
         )  # nosec B603
         subprocess.run(
-            [
-                _SED_BIN,
-                "-i",
-                "s|WorkingDirectory=/opt/openhop-repeater|WorkingDirectory=/var/lib/openhop_repeater|",
-                _SVC_UNIT,
-            ],
-            check=False,
-        )  # nosec B603
-        subprocess.run(
             [_SED_BIN, "-i", f"s|ExecStart=/usr/bin/python3|ExecStart={_VENV_PYTHON}|", _SVC_UNIT],
             check=False,
         )  # nosec B603
@@ -830,55 +819,12 @@ def _migrate_service_unit() -> None:
         logger.warning(f"[Update] Service unit migration failed: {exc}")
 
 
-def _merge_tree_missing_only(src: str, dst: str) -> None:
-    """Merge src into dst without overwriting existing files."""
-    if not os.path.isdir(src):
-        return
-
-    for root, dirs, files in os.walk(src):
-        rel = os.path.relpath(root, src)
-        target_root = dst if rel == "." else os.path.join(dst, rel)
-        os.makedirs(target_root, exist_ok=True)
-
-        for d in dirs:
-            os.makedirs(os.path.join(target_root, d), exist_ok=True)
-
-        for f in files:
-            src_file = os.path.join(root, f)
-            dst_file = os.path.join(target_root, f)
-            if not os.path.exists(dst_file):
-                shutil.copy2(src_file, dst_file)
-
-
-def _migrate_legacy_install_path() -> None:
-    """Handle /opt/openhop-repeater -> /opt/openhop_repeater migration safely."""
-    if not os.path.exists(_LEGACY_INSTALL_DIR):
-        return
-
-    if not os.path.exists(_INSTALL_DIR):
-        os.rename(_LEGACY_INSTALL_DIR, _INSTALL_DIR)
-        _state.append_line(
-            f"[pyMC updater] Migrated legacy install path: {_LEGACY_INSTALL_DIR} -> {_INSTALL_DIR}"
-        )
-        return
-
-    _merge_tree_missing_only(_LEGACY_INSTALL_DIR, _INSTALL_DIR)
-    backup_path = f"{_LEGACY_INSTALL_DIR}.migrated.{time.strftime('%Y%m%d_%H%M%S')}"
-    os.rename(_LEGACY_INSTALL_DIR, backup_path)
-    _state.append_line(f"[pyMC updater] Merged legacy install data into {_INSTALL_DIR}")
-    _state.append_line(f"[pyMC updater] Archived legacy install path at {backup_path}")
-
-
 def _cleanup_stale_source_trees() -> None:
     stale_paths = [
         "/opt/openhop_repeater/repeater",
         "/opt/openhop_repeater/openhop_core",
         "/opt/openhop_repeater/openhop-repeater",
         "/opt/openhop_repeater/openhop-core",
-        "/opt/openhop-repeater/repeater",
-        "/opt/openhop-repeater/openhop_core",
-        "/opt/openhop-repeater/openhop-repeater",
-        "/opt/openhop-repeater/openhop-core",
     ]
 
     removed_any = False
@@ -949,7 +895,6 @@ def _do_install() -> None:
         )
         cmd = ["/bin/sh", _BUILDROOT_UPGRADE_HELPER, "upgrade"]
     elif is_root:
-        _migrate_legacy_install_path()
         _migrate_service_unit()
 
         # Ensure venv exists (migration from system-pip era)

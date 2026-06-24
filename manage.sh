@@ -14,10 +14,10 @@ SERVICE_USER="repeater"
 SERVICE_NAME="openhop-repeater"
 SILENT_MODE="${PYMC_SILENT:-${SILENT:-}}"
 
-LEGACY_INSTALL_DIR="/opt/openhop-repeater"
-LEGACY_CONFIG_DIR="/etc/openhop-repeater"
-LEGACY_LOG_DIR="/var/log/openhop-repeater"
-LEGACY_DATA_DIR="/var/lib/openhop-repeater"
+LEGACY_PYMC_INSTALL_DIR="/opt/pymc_repeater"
+LEGACY_PYMC_CONFIG_DIR="/etc/pymc_repeater"
+LEGACY_PYMC_LOG_DIR="/var/log/pymc_repeater"
+LEGACY_PYMC_DATA_DIR="/var/lib/pymc_repeater"
 
 # R2 Wheels Configuration improves install speed on ARM devices
 R2_BASE_URL="https://wheel.pymc.dev/pymc_build_deps"
@@ -36,10 +36,10 @@ cleanup_stale_source_trees() {
         "$INSTALL_DIR/openhop_core" \
         "$INSTALL_DIR/openhop-repeater" \
         "$INSTALL_DIR/openhop-core" \
-        "$LEGACY_INSTALL_DIR/repeater" \
-        "$LEGACY_INSTALL_DIR/openhop_core" \
-        "$LEGACY_INSTALL_DIR/openhop-repeater" \
-        "$LEGACY_INSTALL_DIR/openhop-core"
+        "$LEGACY_PYMC_INSTALL_DIR/repeater" \
+        "$LEGACY_PYMC_INSTALL_DIR/pymc_core" \
+        "$LEGACY_PYMC_INSTALL_DIR/pymc-repeater" \
+        "$LEGACY_PYMC_INSTALL_DIR/pymc-core"
     do
         if [ -e "$path" ]; then
             rm -rf "$path"
@@ -82,10 +82,10 @@ migrate_legacy_paths() {
         echo "    ✓ Archived legacy $label path at $backup_path"
     }
 
-    migrate_one_path "$LEGACY_CONFIG_DIR" "$CONFIG_DIR" "config"
-    migrate_one_path "$LEGACY_LOG_DIR" "$LOG_DIR" "log"
-    migrate_one_path "$LEGACY_DATA_DIR" "$DATA_DIR" "data"
-    migrate_one_path "$LEGACY_INSTALL_DIR" "$INSTALL_DIR" "install"
+    migrate_one_path "$LEGACY_PYMC_CONFIG_DIR" "$CONFIG_DIR" "config"
+    migrate_one_path "$LEGACY_PYMC_LOG_DIR" "$LOG_DIR" "log"
+    migrate_one_path "$LEGACY_PYMC_DATA_DIR" "$DATA_DIR" "data"
+    migrate_one_path "$LEGACY_PYMC_INSTALL_DIR" "$INSTALL_DIR" "install"
 }
 
 # Create (or re-create) the dedicated venv for openhop_repeater
@@ -114,9 +114,8 @@ migrate_to_venv() {
             echo "    ✓ Removed legacy PYTHONPATH from service unit"
         fi
         # 3. Fix WorkingDirectory if still pointing at old source
-        if grep -q 'WorkingDirectory=/opt/openhop_repeater\|WorkingDirectory=/opt/openhop-repeater' "$svc_unit" 2>/dev/null; then
+        if grep -q 'WorkingDirectory=/opt/openhop_repeater' "$svc_unit" 2>/dev/null; then
             sed -i 's|WorkingDirectory=/opt/openhop_repeater|WorkingDirectory=/var/lib/openhop_repeater|' "$svc_unit"
-            sed -i 's|WorkingDirectory=/opt/openhop-repeater|WorkingDirectory=/var/lib/openhop_repeater|' "$svc_unit"
             echo "    ✓ Fixed WorkingDirectory in service unit"
         fi
         # 4. Ensure ExecStart uses the venv python
@@ -537,10 +536,6 @@ if [ ! -x "$VENV_PYTHON" ]; then
     python3 -m venv --system-site-packages "$VENV_DIR"
     "$VENV_PIP" install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
 fi
-# ---- Legacy path migration: openhop-repeater -> openhop_repeater ----
-if [ -d /opt/openhop-repeater ] && [ ! -e /opt/openhop_repeater ]; then
-    mv /opt/openhop-repeater /opt/openhop_repeater
-fi
 # ---- Migration: clean up legacy service unit issues ----
 SVC_UNIT=/etc/systemd/system/openhop-repeater.service
 if grep -q 'PYTHONPATH' "$SVC_UNIT" 2>/dev/null; then
@@ -551,19 +546,13 @@ if grep -q 'WorkingDirectory=/opt/openhop_repeater' "$SVC_UNIT" 2>/dev/null; the
     sed -i 's|WorkingDirectory=/opt/openhop_repeater|WorkingDirectory=/var/lib/openhop_repeater|' "$SVC_UNIT"
     systemctl daemon-reload
 fi
-if grep -q 'WorkingDirectory=/opt/openhop-repeater' "$SVC_UNIT" 2>/dev/null; then
-    sed -i 's|WorkingDirectory=/opt/openhop-repeater|WorkingDirectory=/var/lib/openhop_repeater|' "$SVC_UNIT"
-    systemctl daemon-reload
-fi
 if grep -q 'ExecStart=/usr/bin/python3' "$SVC_UNIT" 2>/dev/null; then
     sed -i "s|ExecStart=/usr/bin/python3|ExecStart=$VENV_PYTHON|" "$SVC_UNIT"
     systemctl daemon-reload
 fi
 # ---- Remove stale source trees that shadow the venv package ----
 [ -d /opt/openhop_repeater/repeater ] && rm -rf /opt/openhop_repeater/repeater
-[ -d /opt/openhop-repeater/repeater ] && rm -rf /opt/openhop-repeater/repeater
 [ -d /opt/openhop_repeater/openhop-repeater ] && rm -rf /opt/openhop_repeater/openhop-repeater
-[ -d /opt/openhop-repeater/openhop-repeater ] && rm -rf /opt/openhop-repeater/openhop-repeater
 # ---- Remove old system-level packages to avoid confusion ----
 python3 -m pip uninstall -y openhop_repeater 2>/dev/null || true
 python3 -m pip uninstall -y openhop_core 2>/dev/null || true
@@ -830,6 +819,9 @@ upgrade_repeater() {
         migrate_legacy_paths
         cleanup_stale_source_trees
 
+        echo "[1.6/9] Ensuring required directories..."
+        mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR" "$DATA_DIR"
+
         echo "[2/9] Backing up configuration..."
         if [ -d "$CONFIG_DIR" ]; then
             cp -r "$CONFIG_DIR" "$CONFIG_DIR.backup.$(date +%Y%m%d_%H%M%S)" 2>/dev/null || true
@@ -965,10 +957,6 @@ if [ ! -x "$VENV_PYTHON" ]; then
     python3 -m venv --system-site-packages "$VENV_DIR"
     "$VENV_PIP" install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
 fi
-# ---- Legacy path migration: openhop-repeater -> openhop_repeater ----
-if [ -d /opt/openhop-repeater ] && [ ! -e /opt/openhop_repeater ]; then
-    mv /opt/openhop-repeater /opt/openhop_repeater
-fi
 # ---- Migration: clean up legacy service unit issues ----
 SVC_UNIT=/etc/systemd/system/openhop-repeater.service
 if grep -q 'PYTHONPATH' "$SVC_UNIT" 2>/dev/null; then
@@ -979,19 +967,13 @@ if grep -q 'WorkingDirectory=/opt/openhop_repeater' "$SVC_UNIT" 2>/dev/null; the
     sed -i 's|WorkingDirectory=/opt/openhop_repeater|WorkingDirectory=/var/lib/openhop_repeater|' "$SVC_UNIT"
     systemctl daemon-reload
 fi
-if grep -q 'WorkingDirectory=/opt/openhop-repeater' "$SVC_UNIT" 2>/dev/null; then
-    sed -i 's|WorkingDirectory=/opt/openhop-repeater|WorkingDirectory=/var/lib/openhop_repeater|' "$SVC_UNIT"
-    systemctl daemon-reload
-fi
 if grep -q 'ExecStart=/usr/bin/python3' "$SVC_UNIT" 2>/dev/null; then
     sed -i "s|ExecStart=/usr/bin/python3|ExecStart=$VENV_PYTHON|" "$SVC_UNIT"
     systemctl daemon-reload
 fi
 # ---- Remove stale source trees that shadow the venv package ----
 [ -d /opt/openhop_repeater/repeater ] && rm -rf /opt/openhop_repeater/repeater
-[ -d /opt/openhop-repeater/repeater ] && rm -rf /opt/openhop-repeater/repeater
 [ -d /opt/openhop_repeater/openhop-repeater ] && rm -rf /opt/openhop_repeater/openhop-repeater
-[ -d /opt/openhop-repeater/openhop-repeater ] && rm -rf /opt/openhop-repeater/openhop-repeater
 # ---- Remove old system-level packages to avoid confusion ----
 python3 -m pip uninstall -y openhop_repeater 2>/dev/null || true
 python3 -m pip uninstall -y openhop_core 2>/dev/null || true
@@ -1218,10 +1200,10 @@ uninstall_repeater() {
         rm -rf "$CONFIG_DIR"
         rm -rf "$LOG_DIR"
         rm -rf "$DATA_DIR"
-        rm -rf "$LEGACY_INSTALL_DIR"
-        rm -rf "$LEGACY_CONFIG_DIR"
-        rm -rf "$LEGACY_LOG_DIR"
-        rm -rf "$LEGACY_DATA_DIR"
+        rm -rf "$LEGACY_PYMC_INSTALL_DIR"
+        rm -rf "$LEGACY_PYMC_CONFIG_DIR"
+        rm -rf "$LEGACY_PYMC_LOG_DIR"
+        rm -rf "$LEGACY_PYMC_DATA_DIR"
 
         echo "80"; echo "# Removing service user..."
         if id "$SERVICE_USER" &>/dev/null; then
@@ -1352,6 +1334,9 @@ validate_and_update_config() {
     local config_file="$CONFIG_DIR/config.yaml"
     local example_file="config.yaml.example"
     local updated_example="$CONFIG_DIR/config.yaml.example"
+
+    # Ensure destination config directory exists before copy/merge steps.
+    mkdir -p "$CONFIG_DIR"
 
     # Copy the new example file
     if [ -f "$example_file" ]; then
