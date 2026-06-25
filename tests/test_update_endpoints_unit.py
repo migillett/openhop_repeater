@@ -250,6 +250,22 @@ def test_channels_set_channel_and_changelog(cherrypy_ctx, isolated_state, monkey
     assert c["commits"][0]["title"] == "t"
 
 
+def test_changelog_guard_when_github_unavailable(cherrypy_ctx, isolated_state, monkeypatch):
+    request, _ = cherrypy_ctx
+    request.method = "GET"
+    api = ue.UpdateAPIEndpoints()
+
+    def _raise_fetch(*_args, **_kwargs):
+        raise RuntimeError("HTTP Error 404: Not Found")
+
+    monkeypatch.setattr(ue, "_fetch_changelog", _raise_fetch)
+
+    out = api.changelog(channel="dev", max="5")
+    assert out["success"] is True
+    assert out["channel"] == "dev"
+    assert out["commits"] == []
+
+
 def test_cors_headers_and_error_helpers(cherrypy_ctx):
     _, response = cherrypy_ctx
     api = ue.UpdateAPIEndpoints()

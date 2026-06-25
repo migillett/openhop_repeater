@@ -41,7 +41,7 @@ logger = logging.getLogger("HTTPServer")
 # ---------------------------------------------------------------------------
 # Repository constants
 # ---------------------------------------------------------------------------
-GITHUB_OWNER = "rightup"
+GITHUB_OWNER = "openhop-dev"
 GITHUB_REPO = "openhop-repeater"
 GITHUB_RAW_BASE = f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}"
 GITHUB_API_BASE = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}"
@@ -699,11 +699,10 @@ def _fetch_latest_version(channel: str) -> str:
 
 
 def _fetch_changelog(channel: str, installed: str, max_commits: int = 50) -> List[dict]:
-
-    base_tag = _get_latest_tag()
-    installed_dev = _parse_dev_number(installed)
-
     try:
+        base_tag = _get_latest_tag()
+        installed_dev = _parse_dev_number(installed)
+
         if _branch_is_dynamic(channel):
             compare_url = f"{GITHUB_API_BASE}/compare/{base_tag}...{channel}?per_page=100"
         else:
@@ -1335,7 +1334,12 @@ class UpdateAPIEndpoints:
         installed = snap["current_version"]
         latest = snap["latest_version"] or ""
 
-        commits = _fetch_changelog(channel, installed, max_commits)
+        try:
+            commits = _fetch_changelog(channel, installed, max_commits)
+        except Exception as exc:
+            logger.warning(f"[Update] Changelog endpoint fallback due to GitHub error: {exc}")
+            commits = []
+
         return self._ok(
             {
                 "channel": channel,
