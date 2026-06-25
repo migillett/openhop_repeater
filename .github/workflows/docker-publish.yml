@@ -10,7 +10,7 @@ on:
       image_repository:
         description: "Docker image repository to publish to"
         required: false
-        default: "pymcdev/openhop-repeater"
+        default: "openhop/openhop-repeater"
 
 jobs:
   docker:
