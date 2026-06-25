@@ -585,7 +585,7 @@ fi
 if [ ! -x "$VENV_PYTHON" ]; then
     echo "[pymc-do-upgrade] Creating venv at $VENV_DIR ..."
     python3 -m venv --system-site-packages "$VENV_DIR"
-    "$VENV_PIP" install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
+    "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
 fi
 # ---- Migration: clean up legacy service unit issues ----
 SVC_UNIT=/etc/systemd/system/openhop-repeater.service
@@ -633,10 +633,10 @@ if [ -n "$ARCH_TAG" ]; then
     PY_TAG=$("$VENV_PYTHON" -c 'import sys; v=f"cp{sys.version_info.major}{sys.version_info.minor}"; print(f"{v}-{v}")' 2>/dev/null || echo "cp311-cp311")
     WHEEL_BASE="${R2_BASE_URL}/${ARCH_TAG}/${PLATFORM_TAG}/${PY_TAG}"
     echo "[pymc-do-upgrade] Trying dependencies from R2 wheels..."
-    "$VENV_PIP" install --find-links "${WHEEL_BASE}/index.html" --no-cache-dir "pycryptodome>=3.23.0" "PyNaCl>=1.5.0" cffi "pyyaml>=6.0.0" 2>/dev/null || true
+    "$VENV_PYTHON" -m pip install --find-links "${WHEEL_BASE}/index.html" --no-cache-dir "pycryptodome>=3.23.0" "PyNaCl>=1.5.0" cffi "pyyaml>=6.0.0" 2>/dev/null || true
 fi
 # ---- Install openhop_repeater from git ----
-if "$VENV_PIP" install \
+if "$VENV_PYTHON" -m pip install \
     --upgrade \
     --no-cache-dir \
     "openhop_repeater[hardware] @ git+https://github.com/rightup/openhop-repeater.git@${CHANNEL}"; then
@@ -705,7 +705,7 @@ UPGRADEEOF
             WHEEL_BASE="${R2_BASE_URL}/${ARCH_TAG}/${PLATFORM_TAG}/${PY_TAG}"
             echo "  Checking for R2 wheels (${ARCH_TAG}/${PLATFORM_TAG}/${PY_TAG})..."
             echo "  Trying install from R2 pre-built wheels..."
-            "$VENV_PIP" install --find-links "${WHEEL_BASE}/index.html" --no-cache-dir "pycryptodome>=3.23.0" "PyNaCl>=1.5.0" cffi "pyyaml>=6.0.0" 2>/dev/null && R2_SUCCESS=1 || R2_SUCCESS=0
+            "$VENV_PYTHON" -m pip install --find-links "${WHEEL_BASE}/index.html" --no-cache-dir "pycryptodome>=3.23.0" "PyNaCl>=1.5.0" cffi "pyyaml>=6.0.0" 2>/dev/null && R2_SUCCESS=1 || R2_SUCCESS=0
             if [ "$R2_SUCCESS" -eq 1 ]; then
                 echo "  ✓ R2 wheels installed"
             else
@@ -714,7 +714,7 @@ UPGRADEEOF
         fi
     fi
     
-    if "$VENV_PIP" install --upgrade --no-cache-dir .[hardware]; then
+    if "$VENV_PYTHON" -m pip install --upgrade --no-cache-dir .[hardware]; then
         echo ""
         echo "✓ Python package installation completed successfully!"
 
@@ -1020,7 +1020,7 @@ fi
 if [ ! -x "$VENV_PYTHON" ]; then
     echo "[pymc-do-upgrade] Creating venv at $VENV_DIR ..."
     python3 -m venv --system-site-packages "$VENV_DIR"
-    "$VENV_PIP" install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
+    "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel >/dev/null 2>&1 || true
 fi
 # ---- Migration: clean up legacy service unit issues ----
 SVC_UNIT=/etc/systemd/system/openhop-repeater.service
@@ -1068,10 +1068,10 @@ python3 -m pip uninstall -y pymc_core 2>/dev/null || true
             PY_TAG=$("$VENV_PYTHON" -c 'import sys; v=f"cp{sys.version_info.major}{sys.version_info.minor}"; print(f"{v}-{v}")' 2>/dev/null || echo "cp311-cp311")
             WHEEL_BASE="${R2_BASE_URL}/${ARCH_TAG}/${PLATFORM_TAG}/${PY_TAG}"
             echo "[pymc-do-upgrade] Trying dependencies from R2 wheels..."
-            "$VENV_PIP" install --find-links "${WHEEL_BASE}/index.html" --no-cache-dir "pycryptodome>=3.23.0" "PyNaCl>=1.5.0" cffi "pyyaml>=6.0.0" 2>/dev/null || true
+            "$VENV_PYTHON" -m pip install --find-links "${WHEEL_BASE}/index.html" --no-cache-dir "pycryptodome>=3.23.0" "PyNaCl>=1.5.0" cffi "pyyaml>=6.0.0" 2>/dev/null || true
         fi
         # ---- Install openhop_repeater from git ----
-        if "$VENV_PIP" install \
+        if "$VENV_PYTHON" -m pip install \
             --upgrade \
             --no-cache-dir \
             "openhop_repeater[hardware] @ git+https://github.com/rightup/openhop-repeater.git@${CHANNEL}"; then
@@ -1140,7 +1140,7 @@ UPGRADEEOF
                 WHEEL_BASE="${R2_BASE_URL}/${ARCH_TAG}/${PLATFORM_TAG}/${PY_TAG}"
                 echo "  Checking for R2 wheels (${ARCH_TAG}/${PLATFORM_TAG}/${PY_TAG})..."
                 echo "  Trying install from R2 pre-built wheels..."
-                "$VENV_PIP" install --find-links "${WHEEL_BASE}/index.html" --no-cache-dir "pycryptodome>=3.23.0" "PyNaCl>=1.5.0" cffi "pyyaml>=6.0.0" 2>/dev/null && R2_SUCCESS=1 || R2_SUCCESS=0
+                "$VENV_PYTHON" -m pip install --find-links "${WHEEL_BASE}/index.html" --no-cache-dir "pycryptodome>=3.23.0" "PyNaCl>=1.5.0" cffi "pyyaml>=6.0.0" 2>/dev/null && R2_SUCCESS=1 || R2_SUCCESS=0
                 if [ "$R2_SUCCESS" -eq 1 ]; then
                     echo "  ✓ R2 wheels installed"
                 else
@@ -1149,7 +1149,7 @@ UPGRADEEOF
             fi
         fi
         
-        if "$VENV_PIP" install --upgrade --no-cache-dir .[hardware]; then
+        if "$VENV_PYTHON" -m pip install --upgrade --no-cache-dir .[hardware]; then
             echo ""
             echo "✓ Package and dependencies upgraded successfully!"
         else
