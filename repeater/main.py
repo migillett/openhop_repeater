@@ -1140,7 +1140,10 @@ class RepeaterDaemon:
 
         try:
             from openhop_core.protocol import PacketBuilder
-            from openhop_core.protocol.constants import ADVERT_FLAG_HAS_NAME, ADVERT_FLAG_IS_REPEATER
+            from openhop_core.protocol.constants import (
+                ADVERT_FLAG_HAS_NAME,
+                ADVERT_FLAG_IS_REPEATER,
+            )
 
             # Get node name and location from config
             repeater_config = self.config.get("repeater", {})

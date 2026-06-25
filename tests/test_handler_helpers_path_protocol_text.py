@@ -56,7 +56,8 @@ async def test_path_helper_updates_client_out_path_on_valid_decrypt():
     packet = _PathPacket(payload=b"\x11\x22\xaa\xbb\xcc")
 
     with patch(
-        "openhop_core.protocol.crypto.CryptoUtils.mac_then_decrypt", return_value=b"\x02\x99\x88\x01"
+        "openhop_core.protocol.crypto.CryptoUtils.mac_then_decrypt",
+        return_value=b"\x02\x99\x88\x01",
     ):
         handled = await helper.process_path_packet(packet)
 

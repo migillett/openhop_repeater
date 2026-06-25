@@ -370,6 +370,7 @@ def test_do_install_root_install_command_failure_sets_error(isolated_state, monk
     monkeypatch.setattr(ue.os, "geteuid", lambda: 0)
     monkeypatch.setattr(ue, "is_buildroot", lambda: False)
     monkeypatch.setattr(ue, "_migrate_service_unit", lambda: None)
+    monkeypatch.setattr(ue, "_disable_legacy_services", lambda: None)
     monkeypatch.setattr(ue.os.path, "isfile", lambda p: True)
     monkeypatch.setattr(ue.os.path, "isdir", lambda p: False)
 

@@ -29,7 +29,9 @@ def _make_collector() -> StorageCollector:
         patch("repeater.data_acquisition.storage_collector.RRDToolHandler"),
         patch("repeater.data_acquisition.hardware_stats.HardwareStatsCollector"),
     ):
-        collector = StorageCollector(config={"storage": {"storage_dir": "/tmp/openhop_repeater_test"}})
+        collector = StorageCollector(
+            config={"storage": {"storage_dir": "/tmp/openhop_repeater_test"}}
+        )
 
     # Stop any real stats-broadcast thread started during construction so the tests
     # drive the loop deterministically.
