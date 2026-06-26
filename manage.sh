@@ -639,9 +639,9 @@ fi
 if "$VENV_PYTHON" -m pip install \
     --upgrade \
     --no-cache-dir \
-    "openhop_repeater[hardware] @ git+https://github.com/rightup/openhop-repeater.git@${CHANNEL}"; then
+    "openhop_repeater[hardware] @ git+https://github.com/openhop-dev/openhop_repeater.git@${CHANNEL}"; then
     # Keep web/OTA updates aligned with manage.sh install/upgrade defaults.
-    RADIO_BASE_URL="https://raw.githubusercontent.com/rightup/openhop-repeater/${CHANNEL}"
+    RADIO_BASE_URL="https://raw.githubusercontent.com/openhop-dev/openhop_repeater/${CHANNEL}"
     RADIO_STORAGE_DIR="/var/lib/openhop_repeater"
     mkdir -p "$RADIO_STORAGE_DIR"
     wget -qO "$RADIO_STORAGE_DIR/radio-settings.json" "${RADIO_BASE_URL}/radio-settings.json" 2>/dev/null || true
@@ -1074,9 +1074,9 @@ python3 -m pip uninstall -y pymc_core 2>/dev/null || true
         if "$VENV_PYTHON" -m pip install \
             --upgrade \
             --no-cache-dir \
-            "openhop_repeater[hardware] @ git+https://github.com/rightup/openhop-repeater.git@${CHANNEL}"; then
+            "openhop_repeater[hardware] @ git+https://github.com/openhop-dev/openhop_repeater.git@${CHANNEL}"; then
             # Keep web/OTA updates aligned with manage.sh install/upgrade defaults.
-            RADIO_BASE_URL="https://raw.githubusercontent.com/rightup/openhop-repeater/${CHANNEL}"
+            RADIO_BASE_URL="https://raw.githubusercontent.com/openhop-dev/openhop_repeater/${CHANNEL}"
             RADIO_STORAGE_DIR="/var/lib/openhop_repeater"
             mkdir -p "$RADIO_STORAGE_DIR"
             wget -qO "$RADIO_STORAGE_DIR/radio-settings.json" "${RADIO_BASE_URL}/radio-settings.json" 2>/dev/null || true

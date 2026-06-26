@@ -111,8 +111,8 @@ sudo apt install git -y
 ### Clone The Repository
 
 ```bash
-git clone https://github.com/openhop-dev/openhop-repeater.git
-cd openhop-repeater
+git clone https://github.com/openhop-dev/openhop_repeater.git
+cd openhop_repeater
 ```
 
 ### Quick Install
@@ -258,7 +258,7 @@ The web interface can upgrade an installation or switch branches.
 ### CLI
 
 ```bash
-cd openhop-repeater
+cd openhop_repeater
 sudo bash ./manage.sh upgrade
 ```
 
@@ -295,7 +295,7 @@ Hardware, choose one:
 Run this command on the Proxmox host, not inside a container:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/pyMC-dev/openhop-repeater/main/scripts/proxmox-install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/openhop-dev/openhop_repeater/main/scripts/proxmox-install.sh)"
 ```
 
 Replace `main` in the URL with another branch name if needed.
@@ -518,7 +518,7 @@ Pre-commit hooks will automatically:
 
 ## Support
 
-- [pyMC Core](https://github.com/openhop-dev/openhop-core)
+- [pyMC Core](https://github.com/openhop-dev/openhop_core)
 - [MeshCore Discord](https://meshcore.gg)
 
 ## Disclaimer

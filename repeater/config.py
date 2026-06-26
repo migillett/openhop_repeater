@@ -617,7 +617,7 @@ def get_radio_for_board(board_config: dict):
         except ImportError:
             raise RuntimeError(
                 "pymc_tcp radio requires openhop-core >= the release that includes "
-                "PR pyMC-dev/openhop-core#68 (merged 2026-05-13). "
+                "the openhop-core release with TCP modem support. "
                 "Reinstall the [hardware] extra to pick it up."
             ) from None
 
@@ -661,7 +661,7 @@ def get_radio_for_board(board_config: dict):
         except ImportError:
             raise RuntimeError(
                 "pymc_usb radio requires openhop-core >= the release that includes "
-                "PR pyMC-dev/openhop-core#68 (merged 2026-05-13). "
+                "the openhop-core release with TCP modem support. "
                 "Reinstall the [hardware] extra to pick it up."
             ) from None
 

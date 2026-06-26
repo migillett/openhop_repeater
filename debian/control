@@ -15,7 +15,7 @@ Build-Depends: debhelper-compat (= 13),
                python3-psutil,
                git
 Standards-Version: 4.6.2
-Homepage: https://github.com/rightup/openhop-repeater
+Homepage: https://github.com/openhop-dev/openhop_repeater
 X-Python3-Version: >= 3.9
 
 Package: openhop-repeater

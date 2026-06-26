@@ -15,7 +15,7 @@ info:
   version: 1.0.0
   contact:
     name: openHop Repeater
-    url: https://github.com/rightup/openhop-repeater
+    url: https://github.com/openhop-dev/openhop_repeater
 
 servers:
   - url: /api
