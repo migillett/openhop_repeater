@@ -4256,9 +4256,11 @@ class APIEndpoints:
             key_was_generated = False
             if not identity_key:
                 try:
-                    # Generate a new random 32-byte key (same method as config.py)
-                    random_key = os.urandom(32)
-                    identity_key = random_key.hex()
+                    # Use MeshCore-compatible keygen and store 32-byte private scalar hex.
+                    from repeater.keygen import generate_meshcore_keypair
+
+                    _, private_key = generate_meshcore_keypair()
+                    identity_key = private_key[:32].hex()
                     key_was_generated = True
                     logger.info(f"Auto-generated identity key for '{name}': {identity_key[:16]}...")
                 except Exception as gen_error:
