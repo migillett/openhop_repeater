@@ -297,7 +297,7 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         daemon = _make_daemon()
 
         async def _handler(packet, metadata):
-            packet._repeater_drop_reason = "Max flood hops limit reached (21/20)"
+            metadata["_repeater_drop_reason"] = "Max flood hops limit reached"
             return False
 
         daemon.repeater_handler = AsyncMock(side_effect=_handler)

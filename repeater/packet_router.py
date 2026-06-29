@@ -620,7 +620,9 @@ class PacketRouter:
         if self.daemon.repeater_handler and not processed_by_injection:
             sent = await self.daemon.repeater_handler(packet, metadata)
             if sent is False:
-                drop_reason = getattr(packet, "_repeater_drop_reason", None)
+                drop_reason = metadata.get("_repeater_drop_reason")
+                if not isinstance(drop_reason, str):
+                    drop_reason = getattr(packet, "_repeater_drop_reason", None)
                 if not isinstance(drop_reason, str):
                     drop_reason = _drop_reason_from_recent_packets(
                         self.daemon.repeater_handler, packet
