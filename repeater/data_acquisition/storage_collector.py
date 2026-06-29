@@ -39,11 +39,17 @@ class StorageCollector:
         self.sqlite_handler = SQLiteHandler(self.storage_dir)
         self.rrd_handler = RRDToolHandler(self.storage_dir)
 
-        # Initialize MQTT handler if configured
+        # Initialize MQTT handler only when at least one broker is configured
         self.mqtt_handler = None
-        if (
-            config.get("mqtt_brokers", {}) or config.get("letsmesh", {}) or config.get("mqtt", {})
-        ) and local_identity:
+        mqtt_brokers_config = config.get("mqtt_brokers", {}) or {}
+        letsmesh_config = config.get("letsmesh", {}) or {}
+        mqtt_config = config.get("mqtt", {}) or {}
+        has_brokers_configured = (
+            bool(mqtt_brokers_config.get("brokers"))
+            or bool(letsmesh_config)
+            or bool(mqtt_config)
+        )
+        if has_brokers_configured and local_identity:
             try:
                 # Pass local_identity directly (supports both standard and firmware keys)
                 self.mqtt_handler = MeshCoreToMqttPusher(
@@ -58,6 +64,8 @@ class StorageCollector:
             except Exception as e:
                 logger.error(f"Failed to initialize MQTT handler: {e}")
                 self.mqtt_handler = None
+        else:
+            logger.info("MQTT handler disabled - no brokers configured")
 
         # Initialize hardware stats collector
         from .hardware_stats import HardwareStatsCollector
