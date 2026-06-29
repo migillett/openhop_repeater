@@ -400,6 +400,9 @@ class RepeaterHandler(BaseHandler):
             elif route_type in (ROUTE_TYPE_DIRECT, ROUTE_TYPE_TRANSPORT_DIRECT):
                 self.direct_dup_count += 1
 
+        # Expose effective drop reason to PacketRouter
+        setattr(packet, "_repeater_drop_reason", drop_reason)
+
         display_hashes = (
             original_path_hashes if original_path_hashes else packet.get_path_hashes_hex()
         )
