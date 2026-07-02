@@ -149,7 +149,12 @@ async def test_room_server_push_post_to_client_success_direct_route_sets_path_an
     assert ok is True
     assert bytes(packet.path) == b"\xaa\xbb"
     assert packet.path_len == 2
-    injector.assert_awaited_once_with(packet, wait_for_ack=True)
+    injector.assert_awaited_once_with(
+        packet,
+        wait_for_ack=True,
+        expected_crc=67305985,
+        ack_timeout_s=10.0,
+    )
     rs._handle_ack_received.assert_awaited_once_with(
         client.id.get_public_key(), post["post_timestamp"]
     )

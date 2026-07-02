@@ -178,8 +178,12 @@ class RepeaterDaemon:
             from openhop_core import LocalIdentity
             from openhop_core.node.dispatcher import Dispatcher
 
-            self.dispatcher = Dispatcher(self.radio)
+            dedupe_enabled = bool(
+                self.config.get("repeater", {}).get("dispatcher_dedupe_enabled", False)
+            )
+            self.dispatcher = Dispatcher(self.radio, dedupe_enabled=dedupe_enabled)
             logger.info("Dispatcher initialized")
+            logger.info("Dispatcher dedupe enabled: %s", dedupe_enabled)
 
             # Initialize Identity Manager for additional identities (e.g., room servers)
             self.identity_manager = IdentityManager(self.config)
@@ -373,6 +377,11 @@ class RepeaterDaemon:
             self.path_helper = PathHelper(
                 acl_dict=self.login_helper.get_acl_dict(),  # Per-identity ACLs
                 log_fn=logger.info,
+                ack_received_callback=(
+                    self.dispatcher._register_ack_received
+                    if self.dispatcher and hasattr(self.dispatcher, "_register_ack_received")
+                    else None
+                ),
             )
             logger.info("PATH packet processing helper initialized")
 
@@ -403,9 +412,7 @@ class RepeaterDaemon:
                 n,
             )
 
-            # Subscribe to parsed packets (pre-dedup) so duplicate path variants
-            # still appear in the web UI even though the Dispatcher blocks them.
-            self.dispatcher.add_raw_packet_subscriber(self._on_raw_packet_for_dedup_logging)
+            self._register_duplicate_logging_hook(dedupe_enabled)
 
             # When trace reaches final node, push PUSH_CODE_TRACE_DATA (0x89) to companion clients (firmware onTraceRecv)
             self.trace_helper.on_trace_complete = self._on_trace_complete_for_companions
@@ -908,6 +915,14 @@ class RepeaterDaemon:
                 fs.push_rx_raw(snr, rssi, data)
             except Exception as e:
                 logger.debug("Push RX raw to companion: %s", e)
+
+    def _register_duplicate_logging_hook(self, dedupe_enabled: bool) -> None:
+        """Register pre-dedup duplicate logging only when dispatcher dedupe is active."""
+        if not self.dispatcher or not dedupe_enabled:
+            return
+        # When dispatcher dedupe is disabled, duplicates still flow through
+        # router -> repeater_handler and are already recorded there.
+        self.dispatcher.add_raw_packet_subscriber(self._on_raw_packet_for_dedup_logging)
 
     def _on_raw_packet_for_dedup_logging(self, pkt, data: bytes, analysis: dict) -> None:
         """Record duplicate packets for UI visibility.

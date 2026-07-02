@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -329,8 +328,8 @@ class MeshCLI:
     def _cmd_version(self) -> str:
         """Get version information."""
         role = "room_server" if self.identity_type == "room_server" else "repeater"
-        version = self.config.get("version", "1.0.0")
-        return f"pyMC_{role} v{version}"
+        version = self.config.get("version", "13")
+        return f"openHop_{role} v{version}"
 
     # ==================== Get Commands ====================
 
