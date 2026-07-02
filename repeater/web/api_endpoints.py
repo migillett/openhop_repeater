@@ -2964,6 +2964,18 @@ class APIEndpoints:
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
+    def packet_by_id(self, packet_id=None):
+        try:
+            if packet_id is None:
+                return self._error("packet_id parameter required")
+            packet = self._get_storage().get_packet_by_id(int(packet_id))
+            return self._success(packet) if packet else self._error("Packet not found")
+        except Exception as e:
+            logger.error(f"Error getting packet by id: {e}")
+            return self._error(e)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
     def rrd_data(self):
         try:
             params = self._get_params(

@@ -862,6 +862,21 @@ paths:
         '200':
           description: Packet details
 
+  /packet_by_id:
+    get:
+      tags: [Packets]
+      summary: Get packet by ID
+      parameters:
+        - name: packet_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Packet database ID to lookup
+      responses:
+        '200':
+          description: Packet details
+
   /packet_type_stats:
     get:
       tags: [Packets]

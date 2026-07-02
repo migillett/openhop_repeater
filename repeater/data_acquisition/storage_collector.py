@@ -45,9 +45,7 @@ class StorageCollector:
         letsmesh_config = config.get("letsmesh", {}) or {}
         mqtt_config = config.get("mqtt", {}) or {}
         has_brokers_configured = (
-            bool(mqtt_brokers_config.get("brokers"))
-            or bool(letsmesh_config)
-            or bool(mqtt_config)
+            bool(mqtt_brokers_config.get("brokers")) or bool(letsmesh_config) or bool(mqtt_config)
         )
         if has_brokers_configured and local_identity:
             try:
@@ -217,7 +215,9 @@ class StorageCollector:
 
     def _record_packet_blocking(self, packet_record: dict, skip_mqtt: bool):
         """Store, aggregate, update metrics, and publish one packet (writer thread)."""
-        self.sqlite_handler.store_packet(packet_record)
+        packet_id = self.sqlite_handler.store_packet(packet_record)
+        if packet_id is not None:
+            packet_record["id"] = packet_id
         cumulative_counts = self.sqlite_handler.get_cumulative_counts()
         self.rrd_handler.update_packet_metrics(packet_record, cumulative_counts)
         self._publish_packet_sync(packet_record, skip_mqtt)
@@ -423,6 +423,9 @@ class StorageCollector:
 
     def get_packet_by_hash(self, packet_hash: str) -> Optional[dict]:
         return self.sqlite_handler.get_packet_by_hash(packet_hash)
+
+    def get_packet_by_id(self, packet_id: int) -> Optional[dict]:
+        return self.sqlite_handler.get_packet_by_id(packet_id)
 
     def get_rrd_data(
         self,

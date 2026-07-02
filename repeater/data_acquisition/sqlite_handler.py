@@ -671,7 +671,7 @@ class SQLiteHandler:
                 except Exception:
                     fwd_path_val = str(fwd_path)
 
-                conn.execute(
+                cursor = conn.execute(
                     """
                     INSERT INTO packets (
                         timestamp, type, route, length, rssi, snr, score,
@@ -714,6 +714,7 @@ class SQLiteHandler:
                     ),
                 )
                 self._invalidate_hot_caches()
+                return cursor.lastrowid
 
         except Exception as e:
             logger.error(f"Failed to store packet in SQLite: {e}")
@@ -992,6 +993,7 @@ class SQLiteHandler:
                 packets = conn.execute(
                     """
                     SELECT
+                        id,
                         timestamp, type, route, length, rssi, snr, score,
                         transmitted, is_duplicate, drop_reason, src_hash, dst_hash, path_hash,
                         transport_codes, payload, payload_length,
@@ -1044,6 +1046,7 @@ class SQLiteHandler:
 
                 base_query = """
                     SELECT
+                        id,
                         timestamp, type, route, length, rssi, snr, score,
                         transmitted, is_duplicate, drop_reason, src_hash, dst_hash, path_hash,
                         transport_codes, payload, payload_length,
@@ -1176,6 +1179,7 @@ class SQLiteHandler:
                 packet = conn.execute(
                     """
                     SELECT
+                        id,
                         timestamp, type, route, length, rssi, snr, score,
                         transmitted, is_duplicate, drop_reason, src_hash, dst_hash, path_hash,
                         header, transport_codes, payload, payload_length,
@@ -1191,6 +1195,32 @@ class SQLiteHandler:
 
         except Exception as e:
             logger.error(f"Failed to get packet by hash: {e}")
+            return None
+
+    def get_packet_by_id(self, packet_id: int) -> Optional[dict]:
+        try:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+
+                packet = conn.execute(
+                    """
+                    SELECT
+                        id,
+                        timestamp, type, route, length, rssi, snr, score,
+                        transmitted, is_duplicate, drop_reason, src_hash, dst_hash, path_hash,
+                        header, transport_codes, payload, payload_length,
+                        tx_delay_ms, packet_hash, original_path, forwarded_path, raw_packet,
+                        lbt_attempts, lbt_backoff_delays_ms, lbt_channel_busy
+                    FROM packets
+                    WHERE id = ?
+                """,
+                    (packet_id,),
+                ).fetchone()
+
+                return dict(packet) if packet else None
+
+        except Exception as e:
+            logger.error(f"Failed to get packet by id: {e}")
             return None
 
     def get_packet_type_stats(self, hours: int = 24) -> dict:
