@@ -10,10 +10,13 @@ ARG GPIO_GID=986
 ARG SPI_GID=989
 ARG TARGETARCH
 ARG YQ_VERSION=v4.40.5
+ARG PYMC_CONSOLE_REPO=Treehouse-00/pymc_console-dist
+ARG PYMC_CONSOLE_VERSION=latest
 
 ENV INSTALL_DIR=/opt/openhop_repeater \
     CONFIG_DIR=/etc/openhop_repeater \
     DATA_DIR=/var/lib/openhop_repeater \
+    PYMC_CONSOLE_WEB_DIR=/opt/pymc_console/web/html \
     HOME_DIR=/home/${USER} \
     PATH=/home/${USER}/.local/bin:${PATH} \
     PYTHONUNBUFFERED=1 \
@@ -49,6 +52,21 @@ RUN arch="${TARGETARCH:-}" \
     && wget -qO /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" \
     && chmod +x /usr/local/bin/yq
 
+# Bundle the optional PyMC Console frontend so the web UI can select it without
+# requiring a host bind mount. Use PYMC_CONSOLE_VERSION=latest to pull the
+# newest release at image build time, or pin a tag such as v0.9.329.
+RUN set -eux; \
+    mkdir -p "${PYMC_CONSOLE_WEB_DIR}"; \
+    if [ "${PYMC_CONSOLE_VERSION}" = "latest" ]; then \
+        console_url="https://github.com/${PYMC_CONSOLE_REPO}/releases/latest/download/pymc-ui-latest.tar.gz"; \
+    else \
+        console_url="https://github.com/${PYMC_CONSOLE_REPO}/releases/download/${PYMC_CONSOLE_VERSION}/pymc-ui-${PYMC_CONSOLE_VERSION}.tar.gz"; \
+    fi; \
+    wget -qO /tmp/pymc-console.tar.gz "${console_url}"; \
+    tar -xzf /tmp/pymc-console.tar.gz -C "${PYMC_CONSOLE_WEB_DIR}"; \
+    rm /tmp/pymc-console.tar.gz; \
+    test -f "${PYMC_CONSOLE_WEB_DIR}/index.html"
+
 # Create the group and user in order to run without root privileges
 RUN groupadd --gid "$PGID" "$GROUP" \
     && (getent group dialout >/dev/null || groupadd --gid "$DIALOUT_GID" dialout) \
@@ -59,7 +77,7 @@ RUN groupadd --gid "$PGID" "$GROUP" \
 
 # Create runtime directories
 RUN mkdir -p ${INSTALL_DIR} ${CONFIG_DIR} ${DATA_DIR} \
-    && chown -R "$USER":"$GROUP" ${INSTALL_DIR} ${CONFIG_DIR} ${DATA_DIR} ${HOME_DIR}
+    && chown -R "$USER":"$GROUP" ${INSTALL_DIR} ${CONFIG_DIR} ${DATA_DIR} ${HOME_DIR} /opt/pymc_console
 
 WORKDIR ${INSTALL_DIR}
 

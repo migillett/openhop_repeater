@@ -428,6 +428,15 @@ that source as a directory, which breaks startup.
 docker compose up -d
 ```
 
+The Docker image bundles the optional PyMC Console frontend at
+`/opt/pymc_console/web/html`. Local builds with `docker-compose.build.yml`
+download the newest PyMC Console release by default. Set `PYMC_CONSOLE_VERSION`
+in `.env` to pin a release tag such as `v0.9.329`.
+
+After the container starts, open Web Settings and choose `PyMC Console` as the
+web frontend if you want the repeater to serve that UI. The existing
+`/api/check_pymc_console` endpoint should report that the Console path exists.
+
 ### Example `docker-compose.yml`
 
 ```yaml
