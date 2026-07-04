@@ -2169,29 +2169,32 @@ class SQLiteHandler:
             return []
 
     def upsert_client_sync(self, room_hash: str, client_pubkey: str, **kwargs) -> bool:
-        """Insert or update client sync state using single upsert operation."""
+        """Insert or update client sync state without clobbering unspecified fields."""
         try:
             with self._connect() as conn:
                 now = time.time()
-                kwargs["updated_at"] = now
+                update_fields = dict(kwargs)
+                update_fields["updated_at"] = now
 
-                # Set defaults for insert path
-                kwargs.setdefault("sync_since", 0)
-                kwargs.setdefault("pending_ack_crc", 0)
-                kwargs.setdefault("push_post_timestamp", 0)
-                kwargs.setdefault("ack_timeout_time", 0)
-                kwargs.setdefault("push_failures", 0)
-                kwargs.setdefault("last_activity", now)
+                # INSERT must satisfy NOT NULL columns (last_activity), while
+                # ON CONFLICT updates should only touch supplied fields.
+                insert_fields = dict(update_fields)
+                if insert_fields.get("last_activity") is None:
+                    insert_fields["last_activity"] = now
 
-                columns = ["room_hash", "client_pubkey"] + list(kwargs.keys())
+                columns = ["room_hash", "client_pubkey"] + list(insert_fields.keys())
                 placeholders = ["?"] * len(columns)
-                values = [room_hash, client_pubkey] + list(kwargs.values())
+                values = [room_hash, client_pubkey] + list(insert_fields.values())
 
-                # Use INSERT OR REPLACE for single atomic upsert
+                # Update only supplied columns on conflict so partial updates don't
+                # reset counters/state such as push_failures.
+                update_set = ", ".join(f"{col}=excluded.{col}" for col in update_fields.keys())
                 conn.execute(
                     f"""
-                    INSERT OR REPLACE INTO room_client_sync ({", ".join(columns)})
+                    INSERT INTO room_client_sync ({", ".join(columns)})
                     VALUES ({", ".join(placeholders)})
+                    ON CONFLICT(room_hash, client_pubkey)
+                    DO UPDATE SET {update_set}
                 """,
                     values,
                 )
