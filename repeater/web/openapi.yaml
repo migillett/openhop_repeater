@@ -1600,6 +1600,163 @@ paths:
                   error:
                     type: string
 
+  /discover_neighbors_start:
+    post:
+      tags: [Network Policy]
+      summary: Start neighbor discovery session
+      description: Start a short-lived discovery broadcast session and return a session ID for SSE streaming.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                timeout:
+                  type: number
+                  minimum: 1
+                  maximum: 60
+                  default: 5
+                filter_mask:
+                  type: integer
+                  minimum: 0
+                  maximum: 255
+                  default: 4
+                since:
+                  type: integer
+                  minimum: 0
+                  default: 0
+                prefix_only:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Discovery session started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      session_id:
+                        type: string
+                      tag:
+                        type: integer
+                      status:
+                        type: string
+                      timeout:
+                        type: number
+                      filter_mask:
+                        type: integer
+                      since:
+                        type: integer
+                      prefix_only:
+                        type: boolean
+                      created_at:
+                        type: number
+                      started_at:
+                        type: number
+                        nullable: true
+                      completed_at:
+                        type: number
+                        nullable: true
+                      count:
+                        type: integer
+                      error:
+                        type: string
+                        nullable: true
+                  message:
+                    type: string
+                  error:
+                    type: string
+
+  /discover_neighbors_stream:
+    get:
+      tags: [Network Policy]
+      summary: Stream discovery events
+      description: Stream live neighbor discovery session events via Server-Sent Events (SSE).
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      parameters:
+        - name: session_id
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: last_event_id
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+          description: JWT token for EventSource clients that cannot send Authorization headers.
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /add_discovered_neighbor:
+    post:
+      tags: [Network Policy]
+      summary: Add discovered node as neighbor
+      description: Persist a discovered node into the adverts/neighbors store for future management.
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pub_key]
+              properties:
+                pub_key:
+                  type: string
+                  description: Hex pubkey (8-byte or 32-byte form).
+                node_name:
+                  type: string
+                  nullable: true
+                node_type:
+                  type: integer
+                rssi:
+                  type: integer
+                  nullable: true
+                response_snr:
+                  type: number
+                  nullable: true
+                snr:
+                  type: number
+                  nullable: true
+      responses:
+        '200':
+          description: Node added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                  message:
+                    type: string
+                  error:
+                    type: string
+
   /policy:
     get:
       tags: [Network Policy]
