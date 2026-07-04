@@ -4,8 +4,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from openhop_core.protocol.constants import PAYLOAD_TYPE_ANON_REQ, ROUTE_TYPE_DIRECT
+
 from repeater.handler_helpers.discovery import DiscoveryHelper
 from repeater.handler_helpers.login import LoginHelper
 from repeater.handler_helpers.trace import TraceHelper

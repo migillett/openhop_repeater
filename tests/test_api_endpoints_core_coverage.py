@@ -1,7 +1,7 @@
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
-from concurrent.futures import TimeoutError as FutureTimeoutError
 
 import cherrypy
 import pytest
