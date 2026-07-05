@@ -30,10 +30,9 @@ _websocket_plugin = None
 class PacketWebSocket(WebSocket):
     def opened(self):
         """Called when a WebSocket connection is established"""
-        # Authenticate using JWT provided as query parameter (token=)
         jwt_handler = cherrypy.config.get("jwt_handler")
+        token_manager = cherrypy.config.get("token_manager")
 
-        # Get query string from environ
         qs = ""
         if hasattr(self, "environ"):
             qs = self.environ.get("QUERY_STRING", "")
@@ -42,38 +41,51 @@ class PacketWebSocket(WebSocket):
         token = params.get("token", [None])[0]
         client_id = params.get("client_id", [None])[0]
 
+        api_key = self.environ.get("HTTP_X_API_KEY", "") if hasattr(self, "environ") else ""
+
         if not jwt_handler:
             logger.warning("WebSocket connection rejected: no JWT handler configured")
             self.close(code=1011, reason="server configuration error")
             return
 
-        if not token:
+        if not token and not api_key:
             logger.warning("WebSocket connection rejected: missing token")
             self.close(code=1008, reason="unauthorized")
             return
 
-        try:
-            payload = jwt_handler.verify_jwt(token)
-            if not payload:
-                logger.warning("WebSocket connection rejected: invalid token")
-                self.close(code=1008, reason="unauthorized")
-                return
-        except Exception as e:
-            logger.warning(f"WebSocket auth error: {e}")
-            self.close(code=1008, reason="unauthorized")
-            return
+        if token:
+            try:
+                payload = jwt_handler.verify_jwt(token)
+                if payload:
+                    if client_id and payload.get("client_id") and payload.get("client_id") != client_id:
+                        logger.warning("WebSocket connection rejected: client_id mismatch")
+                        self.close(code=1008, reason="unauthorized")
+                        return
+                    self.user = payload.get("sub")
+                    _connected_clients.add(self)
+                    logger.info(
+                        f"WebSocket connected ({self.user or 'unknown user'}). Total clients: {len(_connected_clients)}"
+                    )
+                    return
+            except Exception as e:
+                logger.warning(f"WebSocket JWT auth error: {e}")
 
-        if client_id and payload.get("client_id") and payload.get("client_id") != client_id:
-            logger.warning("WebSocket connection rejected: client_id mismatch")
-            self.close(code=1008, reason="unauthorized")
-            return
+        api_token = api_key or token
+        if api_token and token_manager:
+            try:
+                token_info = token_manager.verify_token(api_token)
+                if token_info:
+                    self.user = f"api_token:{token_info.get('name', 'unknown')}"
+                    _connected_clients.add(self)
+                    logger.info(
+                        f"WebSocket connected (API token: {token_info.get('name', 'unknown')}). Total clients: {len(_connected_clients)}"
+                    )
+                    return
+            except Exception as e:
+                logger.warning(f"WebSocket API key auth error: {e}")
 
-        # Auth success - store user and add to connected clients
-        self.user = payload.get("sub")  # type: ignore[attr-defined]
-        _connected_clients.add(self)
-        logger.info(
-            f"WebSocket connected ({self.user or 'unknown user'}). Total clients: {len(_connected_clients)}"
-        )
+        logger.warning("WebSocket connection rejected: no valid authentication")
+        self.close(code=1008, reason="unauthorized")
 
     def closed(self, code, reason=None):
         """Called when a WebSocket connection is closed"""
