@@ -312,9 +312,7 @@
       "use_dio2_rf": true,
       "use_dio3_tcxo": true,
       "dio3_tcxo_voltage": 1.8,
-      "preamble_length": 32,
-      "use_gpiod_backend": true,
-      "gpio_chip": 1
+      "preamble_length": 32
     },
     "rak6421-13300x-slot2": {
       "name": "Rak Wireless RAK6421 with RAK1330x on IO Slot 2",
@@ -333,9 +331,7 @@
       "use_dio2_rf": true,
       "use_dio3_tcxo": true,
       "dio3_tcxo_voltage": 1.8,
-      "preamble_length": 32,
-      "use_gpiod_backend": true,
-      "gpio_chip": 1
+      "preamble_length": 32
     },
     "ultrapeaterzero-e22": {
       "name": "Zindello Industries UltraPeaterZero E22",
@@ -389,9 +385,7 @@
       "use_dio2_rf": true,
       "use_dio3_tcxo": true,
       "dio3_tcxo_voltage": 1.8,
-      "preamble_length": 32,
-      "use_gpiod_backend": true,
-      "gpio_chip": 1
+      "preamble_length": 32
     },
     "pymc_usb": {
       "name": "pymc_usb modem (USB-CDC)",
