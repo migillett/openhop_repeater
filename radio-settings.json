@@ -336,8 +336,7 @@
       "use_dio3_tcxo": true,
       "dio3_tcxo_voltage": 1.8,
       "preamble_length": 32
-    },
-        },
+    },        
     "rak6421-13300x-slot2": {
       "name": "Rak Wireless RAK6421 with RAK1330x on IO Slot 2",
       "description": "Use this radio settings preset if you have modded your pi hat to work with dual radios see https://discord.com/channels/1495203904898728149/1512614022913200159 .",
