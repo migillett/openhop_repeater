@@ -251,7 +251,7 @@ class TestPersistSkipWhenOff:
         fs.sqlite_handler = MagicMock()
         fs.companion_hash = "0x01"
         bridge = MagicMock()
-        bridge.message_queue._max_size = max_size
+        bridge.message_queue.max_size = max_size
         fs.bridge = bridge
         return fs
 
