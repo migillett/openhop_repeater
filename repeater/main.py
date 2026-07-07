@@ -656,6 +656,9 @@ class RepeaterDaemon:
                             sk = msg_dict.get("sender_key", b"")
                             if isinstance(sk, str):
                                 sk = bytes.fromhex(sk)
+                            sp = msg_dict.get("sender_prefix", b"")
+                            if isinstance(sp, str):
+                                sp = bytes.fromhex(sp) if sp else b""
                             bridge.message_queue.push(
                                 QueuedMessage(
                                     sender_key=sk,
@@ -665,6 +668,7 @@ class RepeaterDaemon:
                                     is_channel=bool(msg_dict.get("is_channel", False)),
                                     channel_idx=msg_dict.get("channel_idx", 0),
                                     path_len=msg_dict.get("path_len", 0),
+                                    sender_prefix=sp,
                                 )
                             )
 
@@ -842,6 +846,9 @@ class RepeaterDaemon:
                     sk = msg_dict.get("sender_key", b"")
                     if isinstance(sk, str):
                         sk = bytes.fromhex(sk)
+                    sp = msg_dict.get("sender_prefix", b"")
+                    if isinstance(sp, str):
+                        sp = bytes.fromhex(sp) if sp else b""
                     bridge.message_queue.push(
                         QueuedMessage(
                             sender_key=sk,
@@ -851,6 +858,7 @@ class RepeaterDaemon:
                             is_channel=bool(msg_dict.get("is_channel", False)),
                             channel_idx=msg_dict.get("channel_idx", 0),
                             path_len=msg_dict.get("path_len", 0),
+                            sender_prefix=sp,
                         )
                     )
 

@@ -91,6 +91,9 @@ class CompanionFrameServer(_BaseFrameServer):
         msg_dict = self.sqlite_handler.companion_pop_message(self.companion_hash)
         if not msg_dict:
             return None
+        sender_prefix = msg_dict.get("sender_prefix", b"")
+        if isinstance(sender_prefix, str):
+            sender_prefix = bytes.fromhex(sender_prefix) if sender_prefix else b""
         return QueuedMessage(
             sender_key=msg_dict.get("sender_key", b""),
             txt_type=msg_dict.get("txt_type", 0),
@@ -99,6 +102,7 @@ class CompanionFrameServer(_BaseFrameServer):
             is_channel=bool(msg_dict.get("is_channel", False)),
             channel_idx=msg_dict.get("channel_idx", 0),
             path_len=msg_dict.get("path_len", 0),
+            sender_prefix=sender_prefix,
         )
 
     # -----------------------------------------------------------------
