@@ -1393,8 +1393,19 @@ class RepeaterDaemon:
             await self.initialize()
 
             # Start HTTP stats server
-            http_port = self.config.get("http", {}).get("port", 8000)
-            http_host = self.config.get("http", {}).get("host", "0.0.0.0")  # nosec B104
+            http_config = self.config.get("http", {})
+            http_port = http_config.get("port", 8000)
+            http_host = http_config.get("host", "0.0.0.0")  # nosec B104
+            http_enabled_raw = http_config.get("enabled", True)
+            if isinstance(http_enabled_raw, str):
+                http_enabled = http_enabled_raw.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            else:
+                http_enabled = bool(http_enabled_raw)
 
             node_name = self.config.get("repeater", {}).get("node_name", "Repeater")
 
@@ -1423,10 +1434,13 @@ class RepeaterDaemon:
                 config_path=getattr(self, "config_path", "/etc/openhop_repeater/config.yaml"),
             )
 
-            try:
-                self.http_server.start()
-            except Exception as e:
-                logger.error(f"Failed to start HTTP server: {e}")
+            if http_enabled:
+                try:
+                    self.http_server.start()
+                except Exception as e:
+                    logger.error(f"Failed to start HTTP server: {e}")
+            else:
+                logger.info("HTTP server startup skipped (http.enabled=false)")
 
             # Run dispatcher (handles RX/TX via openhop_core)
             try:

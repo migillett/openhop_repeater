@@ -457,6 +457,7 @@ class TextHelper:
             "advert",
             "clock",
             "time ",
+            "http ",
             "password ",
             "clear ",
             "ver",

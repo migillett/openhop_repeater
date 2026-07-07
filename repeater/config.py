@@ -230,6 +230,13 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     if "mesh" not in config:
         config["mesh"] = {}
 
+    if "http" not in config:
+        config["http"] = {
+            "enabled": True,
+            "host": "0.0.0.0",
+            "port": 8000,
+        }
+
     if "glass" not in config:
         config["glass"] = {
             "enabled": False,

@@ -80,6 +80,10 @@ class MeshCLI:
             return self._cmd_clock(command)
         elif command.startswith("time "):
             return self._cmd_time(command)
+        elif command == "http start":
+            return self._cmd_http_start()
+        elif command == "http stop":
+            return self._cmd_http_stop()
         elif command == "start ota":
             return "Error: OTA not supported in Python repeater"
         elif command.startswith("password "):
@@ -155,6 +159,8 @@ class MeshCLI:
             "  advert              Send self advertisement",
             "  clock               Show current UTC time",
             "  clock sync          Sync clock (no-op, uses system time)",
+            "  http start          Start the HTTP server",
+            "  http stop           Stop the HTTP server",
             "  ver                 Show version info",
             "  password <pw>       Change admin password",
             "  clear stats         Clear statistics",
@@ -225,6 +231,9 @@ class MeshCLI:
             "reboot": "Restart the repeater service via systemd.",
             "advert": "Trigger a self-advertisement flood packet.",
             "clock": "'clock' shows UTC time. 'clock sync' is a no-op (system time used).",
+            "http": "http start|stop - Control the HTTP server.",
+            "http start": "Start the HTTP server.",
+            "http stop": "Stop the HTTP server.",
             "ver": "Show repeater version and identity type.",
             "password": "password <new_password> \u2014 Change the admin password.",
             "tempradio": (
@@ -294,6 +303,26 @@ class MeshCLI:
     def _cmd_time(self, command: str) -> str:
         """Set time - not supported in Python (use system time)."""
         return "Error: Time setting not supported (system time is used)"
+
+    def _cmd_http_start(self) -> str:
+        """Start HTTP server."""
+        from repeater.service_utils import start_http_server
+
+        daemon_instance = getattr(self.config_manager, "daemon", None)
+        success, message = start_http_server(daemon_instance)
+        if success:
+            return f"OK - {message}"
+        return f"Error: {message}"
+
+    def _cmd_http_stop(self) -> str:
+        """Stop HTTP server."""
+        from repeater.service_utils import stop_http_server
+
+        daemon_instance = getattr(self.config_manager, "daemon", None)
+        success, message = stop_http_server(daemon_instance)
+        if success:
+            return f"OK - {message}"
+        return f"Error: {message}"
 
     def _cmd_password(self, command: str) -> str:
         """Change admin password."""
