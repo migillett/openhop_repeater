@@ -474,16 +474,30 @@ class PacketRouter:
                     logger.debug(f"Companion bridge advert error: {e}")
 
         elif payload_type == LoginServerHandler.payload_type():
-            # Route to companion if dest is a companion; else to login_helper (for logging into this repeater).
-            # When dest is remote (not handled), pass to engine so DIRECT/FLOOD ANON_REQ can be forwarded.
-            # Our own injected ANON_REQ is suppressed by the engine's duplicate (mark_seen) check.
+            # Route to the local identity that owns this login. The on-air dest
+            # hash is only one byte, so a companion and a room-server identity
+            # can share it; decryption is the only real disambiguator. When both
+            # are registered under the same hash, offer the packet to both — the
+            # owner whose key decrypts replies, the other fails HMAC and no-ops.
+            # When dest is remote (not handled), login_helper passes it to the
+            # engine so DIRECT/FLOOD ANON_REQ can be forwarded. Our own injected
+            # ANON_REQ is suppressed by the engine's duplicate (mark_seen) check.
             dest_hash = packet.payload[0] if packet.payload else None
             companion_bridges = self._companion_bridges_for_packet(packet, metadata)
-            if dest_hash is not None and dest_hash in companion_bridges:
+            login_helper = self.daemon.login_helper
+            login_handlers = getattr(login_helper, "handlers", {}) if login_helper else {}
+
+            has_companion = dest_hash is not None and dest_hash in companion_bridges
+            has_room_server = dest_hash is not None and dest_hash in login_handlers
+
+            if has_companion:
                 await companion_bridges[dest_hash].process_received_packet(packet)
                 processed_by_injection = True
-            elif self.daemon.login_helper:
-                handled = await self.daemon.login_helper.process_login_packet(packet)
+            # Offer to login_helper when a room-server identity shares this hash
+            # (collision) or when no local companion claims it at all (normal
+            # repeater/room-server login + remote-forward handling).
+            if login_helper and (has_room_server or not has_companion):
+                handled = await login_helper.process_login_packet(packet)
                 if handled:
                     processed_by_injection = True
             if processed_by_injection:
@@ -513,17 +527,27 @@ class PacketRouter:
                 await self._register_ack_with_dispatcher(ack_crc, "multi-ACK")
 
         elif payload_type == TextMessageHandler.payload_type():
+            # Same one-byte dest-hash collision handling as the login path above:
+            # a companion and a room-server text identity can share a hash, and
+            # only decryption tells them apart. Offer to both when both are
+            # registered so a companion never shadows a room-server message.
             dest_hash = packet.payload[0] if packet.payload else None
             companion_bridges = self._companion_bridges_for_packet(packet, metadata)
-            if dest_hash is not None and dest_hash in companion_bridges:
+            text_helper = self.daemon.text_helper
+            text_handlers = getattr(text_helper, "handlers", {}) if text_helper else {}
+
+            has_companion = dest_hash is not None and dest_hash in companion_bridges
+            has_text_identity = dest_hash is not None and dest_hash in text_handlers
+
+            if has_companion:
                 await companion_bridges[dest_hash].process_received_packet(packet)
                 processed_by_injection = True
-                self._record_for_ui(packet, metadata)
-            elif self.daemon.text_helper:
-                handled = await self.daemon.text_helper.process_text_packet(packet)
+            if text_helper and (has_text_identity or not has_companion):
+                handled = await text_helper.process_text_packet(packet)
                 if handled:
                     processed_by_injection = True
-                    self._record_for_ui(packet, metadata)
+            if processed_by_injection:
+                self._record_for_ui(packet, metadata)
 
         elif payload_type == PathHandler.payload_type():
             # Always let PathHelper inspect/decrypt PATH first so out_path and bundled ACK state
