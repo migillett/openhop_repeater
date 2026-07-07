@@ -41,6 +41,21 @@ def test_acl_blank_password_guest_rules_and_room_server_password_requirements():
     )
     assert ok is True
     assert perms == PERM_ACL_GUEST
+    guest_client = acl.get_client(identity.get_public_key())
+    assert guest_client is not None
+    assert guest_client.permissions == PERM_ACL_GUEST
+    assert guest_client.shared_secret == b"secret"
+    assert guest_client.last_timestamp == 10
+
+    # Blank-password logins now track replay/timestamp just like password logins.
+    replay_ok, replay_perms = acl.authenticate_client(
+        client_identity=identity,
+        shared_secret=b"secret",
+        password="",
+        timestamp=10,
+    )
+    assert replay_ok is False
+    assert replay_perms == 0
 
     # The read-only guest must land in the ACL with its shared secret: the
     # room server's text handler and sync loop only see ACL members, so an

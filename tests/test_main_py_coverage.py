@@ -76,6 +76,20 @@ def test_get_stats_includes_public_key_gps_sensors_and_radio_state():
     assert stats["radio_error"] == "missing device"
 
 
+def test_register_duplicate_logging_hook_only_when_dispatcher_dedup_enabled():
+    daemon = RepeaterDaemon(_base_config(), radio=object())
+    dispatcher = SimpleNamespace(add_raw_packet_subscriber=MagicMock())
+    daemon.dispatcher = dispatcher
+
+    daemon._register_duplicate_logging_hook(False)
+    dispatcher.add_raw_packet_subscriber.assert_not_called()
+
+    daemon._register_duplicate_logging_hook(True)
+    dispatcher.add_raw_packet_subscriber.assert_called_once_with(
+        daemon._on_raw_packet_for_dedup_logging
+    )
+
+
 def test_detect_container_from_proc_env_and_fallback_path():
     with patch("builtins.open", MagicMock()) as open_mock:
         open_mock.return_value.__enter__.return_value.read.return_value = b"container=docker"

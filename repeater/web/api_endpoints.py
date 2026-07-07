@@ -122,6 +122,9 @@ POLICY_GROUP_KINDS = {
 # GET    /api/unscoped_flood_policy - Get unscoped flood policy
 # POST   /api/unscoped_flood_policy - Update unscoped flood policy
 # POST   /api/ping_neighbor - Ping a neighbor node
+# POST   /api/discover_neighbors_start - Start a live repeater discovery session
+# GET    /api/discover_neighbors_stream?session_id=X - Stream repeater discovery results over SSE
+# POST   /api/add_discovered_neighbor - Persist a discovered node into the neighbors/adverts table
 
 # Identity Management
 # GET    /api/identities - List all identities
@@ -302,6 +305,81 @@ class APIEndpoints:
     def _get_time_range(self, hours):
         end_time = int(time.time())
         return end_time - (hours * 3600), end_time
+
+    def _encode_sse_event(
+        self, payload, event_name: Optional[str] = None, event_id: Optional[int] = None
+    ) -> str:
+        lines = []
+        if event_name:
+            lines.append(f"event: {event_name}")
+        if event_id is not None:
+            lines.append(f"id: {event_id}")
+        lines.append(f"data: {json.dumps(payload, default=str)}")
+        return "\n".join(lines) + "\n\n"
+
+    @staticmethod
+    def _normalize_discovery_node_name(value) -> Optional[str]:
+        """Normalize placeholder discovery names to None.
+
+        Some peers explicitly advertise "Unknown"-style placeholder names.
+        Treat those as missing so callers can fall back to hash/prefix labels.
+        """
+        text = str(value or "").strip()
+        if not text:
+            return None
+
+        normalized = text.lower()
+        if normalized in {"unknown", "unknown node"}:
+            return None
+
+        return text
+
+    def _enrich_discovery_result(self, result: dict) -> dict:
+        enriched = dict(result)
+        enriched["node_name"] = self._normalize_discovery_node_name(enriched.get("node_name"))
+        pub_key = str(enriched.get("pub_key") or "").lower()
+        if not pub_key:
+            return enriched
+
+        try:
+            enriched["node_hash"] = self._fmt_hash(bytes.fromhex(pub_key))
+        except ValueError:
+            enriched["node_hash"] = None
+
+        try:
+            storage = self._get_storage()
+        except Exception:
+            storage = None
+
+        if not storage:
+            enriched["known_neighbor"] = False
+            return enriched
+
+        neighbor_info = {}
+        try:
+            if hasattr(storage, "get_neighbors"):
+                neighbor_info = storage.get_neighbors().get(pub_key, {}) or {}
+        except Exception as exc:
+            logger.debug("Discovery enrichment could not load neighbors: %s", exc)
+
+        if not neighbor_info:
+            try:
+                node_name = storage.get_node_name_by_pubkey(pub_key)
+            except Exception:
+                node_name = None
+            node_name = self._normalize_discovery_node_name(node_name)
+            enriched["known_neighbor"] = bool(node_name)
+            if node_name:
+                enriched["node_name"] = node_name
+            return enriched
+
+        enriched["known_neighbor"] = True
+        enriched["node_name"] = self._normalize_discovery_node_name(neighbor_info.get("node_name"))
+        enriched["contact_type"] = neighbor_info.get("contact_type")
+        enriched["zero_hop"] = neighbor_info.get("zero_hop")
+        enriched["last_seen"] = neighbor_info.get("last_seen")
+        enriched["advert_count"] = neighbor_info.get("advert_count")
+        return enriched
 
     def _process_counter_data(self, data_points, timestamps_ms):
         rates = []
@@ -2964,6 +3042,18 @@ class APIEndpoints:
 
     @cherrypy.expose
     @cherrypy.tools.json_out()
+    def packet_by_id(self, packet_id=None):
+        try:
+            if packet_id is None:
+                return self._error("packet_id parameter required")
+            packet = self._get_storage().get_packet_by_id(int(packet_id))
+            return self._success(packet) if packet else self._error("Packet not found")
+        except Exception as e:
+            logger.error(f"Error getting packet by id: {e}")
+            return self._error(e)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
     def rrd_data(self):
         try:
             params = self._get_params(
@@ -4032,6 +4122,222 @@ class APIEndpoints:
             logger.error(f"Error pinging neighbor: {e}", exc_info=True)
             return self._error(str(e))
 
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    @cherrypy.tools.json_in()
+    def discover_neighbors_start(self):
+
+        self._set_cors_headers()
+
+        if cherrypy.request.method == "OPTIONS":
+            return ""
+
+        try:
+            self._require_post()
+            data = cherrypy.request.json or {}
+            timeout = float(data.get("timeout", 5))
+            filter_mask = int(data.get("filter_mask", 1 << 2))
+            since = int(data.get("since", 0))
+            prefix_only = bool(data.get("prefix_only", False))
+
+            if timeout < 1 or timeout > 60:
+                return self._error("timeout must be between 1 and 60 seconds")
+            if filter_mask < 0 or filter_mask > 0xFF:
+                return self._error("filter_mask must be between 0x00 and 0xFF")
+            if since < 0:
+                return self._error("since must be non-negative")
+
+            if self.event_loop is None:
+                return self._error("Event loop not available")
+
+            discovery_helper = getattr(self.daemon_instance, "discovery_helper", None)
+            if not discovery_helper:
+                return self._error("Discovery helper not available")
+
+            discovery_helper.cleanup_sessions()
+            session = discovery_helper.create_session(
+                timeout=timeout,
+                filter_mask=filter_mask,
+                since=since,
+                prefix_only=prefix_only,
+                result_enricher=self._enrich_discovery_result,
+            )
+
+            self.event_loop.call_soon_threadsafe(
+                discovery_helper.start_session_task, session["session_id"]
+            )
+
+            return self._success(
+                session,
+                message="Discovery session started",
+            )
+        except cherrypy.HTTPError:
+            raise
+        except Exception as e:
+            logger.error("Error starting discovery session: %s", e, exc_info=True)
+            return self._error(str(e))
+
+    @cherrypy.expose
+    def discover_neighbors_stream(self, session_id=None, last_event_id: Optional[str] = None):
+        self._set_cors_headers()
+        cherrypy.response.headers["Content-Type"] = "text/event-stream"
+        cherrypy.response.headers["Cache-Control"] = "no-cache"
+        cherrypy.response.headers["Connection"] = "keep-alive"
+        cherrypy.response.headers["X-Accel-Buffering"] = "no"
+
+        discovery_helper = getattr(self.daemon_instance, "discovery_helper", None)
+
+        try:
+            cursor = int(last_event_id) if last_event_id is not None else 0
+        except (TypeError, ValueError):
+            cursor = 0
+
+        def generate():
+            if not session_id:
+                yield self._encode_sse_event(
+                    {"type": "error", "error": "Missing session_id"},
+                    event_name="error",
+                )
+                return
+
+            if not discovery_helper:
+                yield self._encode_sse_event(
+                    {"type": "error", "error": "Discovery helper not available"},
+                    event_name="error",
+                )
+                return
+
+            snapshot = discovery_helper.get_session_snapshot(session_id)
+            if not snapshot:
+                yield self._encode_sse_event(
+                    {"type": "error", "error": f"Unknown discovery session: {session_id}"},
+                    event_name="error",
+                )
+                return
+
+            yield self._encode_sse_event(
+                {
+                    "type": "connected",
+                    "session": snapshot,
+                },
+                event_name="connected",
+            )
+
+            current_cursor = cursor
+            try:
+                while True:
+                    event_state = discovery_helper.get_events_since(session_id, current_cursor)
+                    if event_state is None:
+                        yield self._encode_sse_event(
+                            {
+                                "type": "error",
+                                "error": f"Unknown discovery session: {session_id}",
+                            },
+                            event_name="error",
+                        )
+                        return
+
+                    events = event_state.get("events", [])
+                    if events:
+                        for event in events:
+                            current_cursor = max(current_cursor, int(event.get("id", 0)))
+                            yield self._encode_sse_event(
+                                event.get("data", {}),
+                                event_name=event.get("event"),
+                                event_id=event.get("id"),
+                            )
+                        if event_state.get("completed"):
+                            return
+                    else:
+                        if event_state.get("completed"):
+                            return
+                        yield self._encode_sse_event(
+                            {"type": "keepalive", "session_id": session_id},
+                            event_name="keepalive",
+                            event_id=current_cursor if current_cursor > 0 else None,
+                        )
+
+                    time.sleep(0.5)
+            except GeneratorExit:
+                logger.debug("Discovery SSE stream closed by client for session %s", session_id)
+            except Exception as exc:
+                logger.error("Discovery SSE stream error: %s", exc, exc_info=True)
+                yield self._encode_sse_event(
+                    {"type": "error", "error": str(exc), "session_id": session_id},
+                    event_name="error",
+                    event_id=current_cursor if current_cursor > 0 else None,
+                )
+
+        return generate()
+
+    discover_neighbors_stream._cp_config = {"response.stream": True}
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    @cherrypy.tools.json_in()
+    @require_auth
+    def add_discovered_neighbor(self):
+
+        self._set_cors_headers()
+
+        if cherrypy.request.method == "OPTIONS":
+            return ""
+
+        try:
+            self._require_post()
+            data = cherrypy.request.json or {}
+            pub_key = str(data.get("pub_key") or "").strip().lower()
+            node_name = self._normalize_discovery_node_name(data.get("node_name"))
+            node_type = int(data.get("node_type", 0))
+            rssi = data.get("rssi")
+            snr = data.get("response_snr", data.get("snr"))
+
+            if not pub_key:
+                return self._error("pub_key is required")
+            if not re.fullmatch(r"[0-9a-f]{16}|[0-9a-f]{64}", pub_key):
+                return self._error("pub_key must be 8-byte or 32-byte hex")
+
+            contact_type = {
+                1: "Chat Node",
+                2: "Repeater",
+                3: "Room Server",
+            }.get(node_type, "Unknown")
+
+            advert_record = {
+                "timestamp": time.time(),
+                "pubkey": pub_key,
+                "node_name": node_name,
+                "is_repeater": node_type == 2,
+                "route_type": 2,
+                "contact_type": contact_type,
+                "latitude": None,
+                "longitude": None,
+                "rssi": int(rssi) if rssi is not None else None,
+                "snr": float(snr) if snr is not None else None,
+                "is_new_neighbor": True,
+                "zero_hop": True,
+            }
+
+            storage = self._get_storage()
+            storage.record_advert(advert_record)
+
+            enriched = self._enrich_discovery_result(
+                {
+                    "pub_key": pub_key,
+                    "node_name": node_name,
+                    "node_type": node_type,
+                    "node_type_name": contact_type,
+                    "rssi": advert_record["rssi"],
+                    "response_snr": advert_record["snr"],
+                }
+            )
+            return self._success(enriched, message="Neighbor added to adverts database")
+        except cherrypy.HTTPError:
+            raise
+        except Exception as e:
+            logger.error("Error adding discovered neighbor: %s", e, exc_info=True)
+            return self._error(str(e))
+
     # ========== Identity Management Endpoints ==========
 
     @cherrypy.expose
@@ -4256,9 +4562,11 @@ class APIEndpoints:
             key_was_generated = False
             if not identity_key:
                 try:
-                    # Generate a new random 32-byte key (same method as config.py)
-                    random_key = os.urandom(32)
-                    identity_key = random_key.hex()
+                    # Use MeshCore-compatible keygen and store 32-byte private scalar hex.
+                    from repeater.keygen import generate_meshcore_keypair
+
+                    _, private_key = generate_meshcore_keypair()
+                    identity_key = private_key[:32].hex()
                     key_was_generated = True
                     logger.info(f"Auto-generated identity key for '{name}': {identity_key[:16]}...")
                 except Exception as gen_error:

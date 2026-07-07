@@ -1,7 +1,7 @@
 import base64
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -168,6 +168,77 @@ def test_store_and_delete_advert(tmp_path):
 
     assert h.delete_advert(advert_id) is True
     assert h.delete_advert(advert_id) is False
+
+
+def test_store_packet_returns_inserted_row_id(tmp_path):
+    h = _make_handler(tmp_path)
+
+    packet_id = h.store_packet(
+        {
+            "timestamp": 123.0,
+            "type": 1,
+            "route": 2,
+            "length": 3,
+            "transmitted": True,
+            "packet_hash": "pkt-1",
+        }
+    )
+
+    assert isinstance(packet_id, int)
+    assert packet_id > 0
+
+    with h._connect() as conn:
+        row = conn.execute(
+            "SELECT id, type, route, length FROM packets WHERE id = ?",
+            (packet_id,),
+        ).fetchone()
+
+    assert row is not None
+    assert row[0] == packet_id
+    assert row[1] == 1
+    assert row[2] == 2
+    assert row[3] == 3
+
+
+def test_recent_packet_queries_include_ids_and_preserve_duplicate_hash_rows(tmp_path):
+    h = _make_handler(tmp_path)
+
+    first_id = h.store_packet(
+        {
+            "timestamp": 100.0,
+            "type": 1,
+            "route": 1,
+            "length": 8,
+            "transmitted": False,
+            "is_duplicate": False,
+            "packet_hash": "same-hash",
+        }
+    )
+    second_id = h.store_packet(
+        {
+            "timestamp": 101.0,
+            "type": 1,
+            "route": 1,
+            "length": 8,
+            "transmitted": True,
+            "is_duplicate": True,
+            "packet_hash": "same-hash",
+        }
+    )
+
+    recent = h.get_recent_packets(limit=10)
+    assert len(recent) == 2
+    assert {packet["id"] for packet in recent} == {first_id, second_id}
+    assert [packet["packet_hash"] for packet in recent] == ["same-hash", "same-hash"]
+
+    filtered = h.get_filtered_packets(limit=10)
+    assert len(filtered) == 2
+    assert {packet["id"] for packet in filtered} == {first_id, second_id}
+
+    by_id = h.get_packet_by_id(int(second_id))
+    assert by_id is not None
+    assert by_id["id"] == second_id
+    assert by_id["packet_hash"] == "same-hash"
 
 
 def test_verify_api_token_last_used_throttle(tmp_path, monkeypatch):

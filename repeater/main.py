@@ -217,8 +217,12 @@ class RepeaterDaemon:
             from openhop_core import LocalIdentity
             from openhop_core.node.dispatcher import Dispatcher
 
-            self.dispatcher = Dispatcher(self.radio)
+            dedupe_enabled = bool(
+                self.config.get("repeater", {}).get("dispatcher_dedupe_enabled", False)
+            )
+            self.dispatcher = Dispatcher(self.radio, dedupe_enabled=dedupe_enabled)
             logger.info("Dispatcher initialized")
+            logger.info("Dispatcher dedupe enabled: %s", dedupe_enabled)
 
             # Initialize Identity Manager for additional identities (e.g., room servers)
             self.identity_manager = IdentityManager(self.config)
@@ -412,9 +416,11 @@ class RepeaterDaemon:
             self.path_helper = PathHelper(
                 acl_dict=self.login_helper.get_acl_dict(),  # Per-identity ACLs
                 log_fn=logger.info,
-                # Embedded PATH ACKs must reach the dispatcher's ACK matching or
-                # wait_for_ack() (e.g. room server pushes) never resolves.
-                ack_received_fn=self.dispatcher._register_ack_received,
+                ack_received_callback=(
+                    self.dispatcher._register_ack_received
+                    if self.dispatcher and hasattr(self.dispatcher, "_register_ack_received")
+                    else None
+                ),
             )
             logger.info("PATH packet processing helper initialized")
 
@@ -445,9 +451,7 @@ class RepeaterDaemon:
                 n,
             )
 
-            # Subscribe to parsed packets (pre-dedup) so duplicate path variants
-            # still appear in the web UI even though the Dispatcher blocks them.
-            self.dispatcher.add_raw_packet_subscriber(self._on_raw_packet_for_dedup_logging)
+            self._register_duplicate_logging_hook(dedupe_enabled)
 
             # When trace reaches final node, push PUSH_CODE_TRACE_DATA (0x89) to companion clients (firmware onTraceRecv)
             self.trace_helper.on_trace_complete = self._on_trace_complete_for_companions
@@ -980,6 +984,14 @@ class RepeaterDaemon:
             except Exception as e:
                 logger.debug("Push RX raw to companion: %s", e)
 
+    def _register_duplicate_logging_hook(self, dedupe_enabled: bool) -> None:
+        """Register pre-dedup duplicate logging only when dispatcher dedupe is active."""
+        if not self.dispatcher or not dedupe_enabled:
+            return
+        # When dispatcher dedupe is disabled, duplicates still flow through
+        # router -> repeater_handler and are already recorded there.
+        self.dispatcher.add_raw_packet_subscriber(self._on_raw_packet_for_dedup_logging)
+
     def _on_raw_packet_for_dedup_logging(self, pkt, data: bytes, analysis: dict) -> None:
         """Record duplicate packets for UI visibility.
 
@@ -1449,8 +1461,19 @@ class RepeaterDaemon:
             await self.initialize()
 
             # Start HTTP stats server
-            http_port = self.config.get("http", {}).get("port", 8000)
-            http_host = self.config.get("http", {}).get("host", "0.0.0.0")  # nosec B104
+            http_config = self.config.get("http", {})
+            http_port = http_config.get("port", 8000)
+            http_host = http_config.get("host", "0.0.0.0")  # nosec B104
+            http_enabled_raw = http_config.get("enabled", True)
+            if isinstance(http_enabled_raw, str):
+                http_enabled = http_enabled_raw.strip().lower() in (
+                    "1",
+                    "true",
+                    "yes",
+                    "on",
+                )
+            else:
+                http_enabled = bool(http_enabled_raw)
 
             node_name = self.config.get("repeater", {}).get("node_name", "Repeater")
 
@@ -1479,10 +1502,13 @@ class RepeaterDaemon:
                 config_path=getattr(self, "config_path", "/etc/openhop_repeater/config.yaml"),
             )
 
-            try:
-                self.http_server.start()
-            except Exception as e:
-                logger.error(f"Failed to start HTTP server: {e}")
+            if http_enabled:
+                try:
+                    self.http_server.start()
+                except Exception as e:
+                    logger.error(f"Failed to start HTTP server: {e}")
+            else:
+                logger.info("HTTP server startup skipped (http.enabled=false)")
 
             # Run dispatcher (handles RX/TX via openhop_core)
             try:

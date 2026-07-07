@@ -329,6 +329,12 @@ class RoomServer:
 
             if sync_state:
                 failures = sync_state.get("push_failures", 0)
+                if failures >= MAX_PUSH_FAILURES:
+                    logger.debug(
+                        f"Room '{self.room_name}': Client 0x{client_info.id.get_public_key()[0]:02X} "
+                        f"at max failures ({failures}), skipping push"
+                    )
+                    return False
                 if failures > 0:
                     # Apply exponential backoff
                     backoff_idx = min(failures, len(RETRY_BACKOFF_SCHEDULE) - 1)
@@ -357,11 +363,8 @@ class RoomServer:
             plaintext = (
                 timestamp.to_bytes(4, "little") + bytes([flags]) + author_prefix + message_bytes
             )
-
-            # Expected ACK: signed-plain receivers (firmware
-            # BaseChatMesh::onPeerDataRecv, and openhop_core's text handler)
-            # ack with sha256(decrypted[0 : 9 + strlen(text)] || client_pubkey)[:4]
-            # — exactly the timestamp+flags+author_prefix+text span built above.
+            # Calculate expected ACK (MeshCore signed text):
+            # sha256(timestamp + flags + author_prefix + text + recipient_pubkey)[:4]
             ack_hash = CryptoUtils.sha256(plaintext + client_info.id.get_public_key())[:4]
             expected_ack_crc = int.from_bytes(ack_hash, "little")
 
@@ -382,30 +385,44 @@ class RoomServer:
             # wire byte (bits 0-5 = hash count, bits 6-7 = hash size - 1);
             # out_path already holds exactly the path bytes.
             if route_type == "direct" and len(client_info.out_path) > 0:
-                packet.path = bytearray(client_info.out_path)
-                packet.path_len = client_info.out_path_len
+                if PathUtils.is_valid_path_len(client_info.out_path_len):
+                    path_byte_len = PathUtils.get_path_byte_len(client_info.out_path_len)
+                    packet.path = bytearray(client_info.out_path[:path_byte_len])
+                    packet.path_len = client_info.out_path_len
+                else:
+                    # Legacy fallback: treat stored path as 1-byte-hop path and clamp to
+                    # valid encoded range (0-63 hops).
+                    legacy_hops = min(len(client_info.out_path), 63)
+                    packet.path = bytearray(client_info.out_path[:legacy_hops])
+                    packet.path_len = legacy_hops
 
             # Calculate ACK timeout from the HOP count, not the encoded byte
             # (0x80 = empty 3-byte-hash path would otherwise give a ~4min wait)
             if route_type == "flood":
                 ack_timeout = PUSH_ACK_TIMEOUT_FLOOD_MS / 1000.0
             else:
-                hops = (
-                    PathUtils.get_path_hash_count(client_info.out_path_len)
-                    if client_info.out_path_len >= 0
-                    else 0
-                )
+                if PathUtils.is_valid_path_len(client_info.out_path_len):
+                    path_len = PathUtils.get_path_hash_count(client_info.out_path_len)
+                else:
+                    path_len = min(len(client_info.out_path), 63)
                 ack_timeout = (
-                    PUSH_TIMEOUT_BASE_MS + PUSH_ACK_TIMEOUT_FACTOR_MS * (hops + 1)
+                    PUSH_TIMEOUT_BASE_MS + PUSH_ACK_TIMEOUT_FACTOR_MS * (path_len + 1)
                 ) / 1000.0
 
             # Update client sync state with pending ACK
+            current_sync_since = (
+                sync_state.get("sync_since", 0)
+                if sync_state
+                else getattr(client_info, "sync_since", 0)
+            )
             self.db.upsert_client_sync(
                 room_hash=f"0x{self.room_hash:02X}",
                 client_pubkey=client_info.id.get_public_key().hex(),
+                sync_since=current_sync_since,
                 pending_ack_crc=expected_ack_crc,
                 push_post_timestamp=post["post_timestamp"],
                 ack_timeout_time=time.time() + ack_timeout,
+                last_activity=time.time(),
             )
             # Send and wait for the client's delivery ACK. The injector must be
             # told the crypto ACK CRC we computed above — its default
@@ -414,8 +431,8 @@ class RoomServer:
             success = await self.packet_injector(
                 packet,
                 wait_for_ack=True,
-                expected_ack_crc=expected_ack_crc,
-                ack_timeout=ack_timeout,
+                expected_crc=expected_ack_crc,
+                ack_timeout_s=ack_timeout,
             )
 
             # SAFETY: Release transmission lock AFTER send completes
@@ -476,7 +493,7 @@ class RoomServer:
                     pending_ack_crc=0,
                 )
 
-                if failures >= 3:
+                if failures >= MAX_PUSH_FAILURES:
                     logger.warning(
                         f"Room '{self.room_name}': Client 0x{client_pubkey[0]:02X} "
                         f"has {failures} consecutive failures"
@@ -641,7 +658,7 @@ class RoomServer:
                             )
                             continue
 
-                        if push_failures >= 3:
+                        if push_failures >= MAX_PUSH_FAILURES:
                             logger.debug(
                                 f"Skipping client 0x{client.id.get_public_key()[0]:02X} (max failures)"
                             )

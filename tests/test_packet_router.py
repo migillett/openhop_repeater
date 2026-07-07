@@ -300,7 +300,7 @@ class TestInFlightCap(unittest.IsolatedAsyncioTestCase):
         daemon = _make_daemon()
 
         async def _handler(packet, metadata):
-            packet._repeater_drop_reason = "Max flood hops limit reached (21/20)"
+            metadata["_repeater_drop_reason"] = "Max flood hops limit reached"
             return False
 
         daemon.repeater_handler = AsyncMock(side_effect=_handler)
@@ -655,7 +655,7 @@ class TestPacketRouterRoutingBranches(unittest.IsolatedAsyncioTestCase):
         router = PacketRouter(daemon)
         pkt = _make_packet(TextMessageHandler.payload_type())
         ok = await router.inject_packet(
-            pkt, wait_for_ack=True, expected_ack_crc=0x1234ABCD, ack_timeout=12.0
+            pkt, wait_for_ack=True, expected_crc=0x1234ABCD, ack_timeout_s=12.0
         )
         self.assertTrue(ok)
         daemon.dispatcher.wait_for_ack.assert_awaited_once_with(0x1234ABCD, timeout=12.0)

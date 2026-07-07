@@ -149,8 +149,8 @@ async def test_room_server_push_post_to_client_success_direct_route_sets_path_an
     injector.assert_awaited_once_with(
         packet,
         wait_for_ack=True,
-        expected_ack_crc=int.from_bytes(b"\x01\x02\x03\x04", "little"),
-        ack_timeout=10.0,  # PUSH_TIMEOUT_BASE + FACTOR * (path_len 2 + 1)
+        expected_crc=67305985,
+        ack_timeout_s=10.0,
     )
     rs._handle_ack_received.assert_awaited_once_with(
         client.id.get_public_key(), post["post_timestamp"]
@@ -214,8 +214,8 @@ async def test_room_server_push_expected_ack_matches_firmware_signed_ack():
 
     # The injector must be told the crypto CRC (and the computed timeout) so
     # dispatcher.wait_for_ack matches the client's actual ACK.
-    assert injector_kwargs[0]["expected_ack_crc"] == expected_ack_crc
-    assert injector_kwargs[0]["ack_timeout"] > 0
+    assert injector_kwargs[0]["expected_crc"] == expected_ack_crc
+    assert injector_kwargs[0]["ack_timeout_s"] > 0
 
     # Decrypt the pushed datagram and verify the signed-plain layout.
     pkt = sent[0]
