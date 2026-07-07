@@ -409,9 +409,7 @@
       "use_dio2_rf": true,
       "use_dio3_tcxo": true,
       "dio3_tcxo_voltage": 1.8,
-      "preamble_length": 32,
-      "use_gpiod_backend": true,
-      "gpio_chip": 1
+      "preamble_length": 32
     },
     "pymc_usb": {
       "name": "pymc_usb modem (USB-CDC)",
