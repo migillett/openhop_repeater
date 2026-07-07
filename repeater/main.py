@@ -412,6 +412,9 @@ class RepeaterDaemon:
             self.path_helper = PathHelper(
                 acl_dict=self.login_helper.get_acl_dict(),  # Per-identity ACLs
                 log_fn=logger.info,
+                # Embedded PATH ACKs must reach the dispatcher's ACK matching or
+                # wait_for_ack() (e.g. room server pushes) never resolves.
+                ack_received_fn=self.dispatcher._register_ack_received,
             )
             logger.info("PATH packet processing helper initialized")
 

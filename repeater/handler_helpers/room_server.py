@@ -6,6 +6,7 @@ from typing import Dict
 
 from openhop_core.protocol import CryptoUtils, PacketBuilder
 from openhop_core.protocol.constants import PAYLOAD_TYPE_TXT_MSG
+from openhop_core.protocol.packet_utils import PathUtils
 
 logger = logging.getLogger("RoomServer")
 
@@ -377,18 +378,25 @@ class RoomServer:
                 route_type=route_type,
             )
 
-            # Add stored path for direct routing
+            # Add stored path for direct routing. out_path_len is the encoded
+            # wire byte (bits 0-5 = hash count, bits 6-7 = hash size - 1);
+            # out_path already holds exactly the path bytes.
             if route_type == "direct" and len(client_info.out_path) > 0:
-                packet.path = bytearray(client_info.out_path[: client_info.out_path_len])
+                packet.path = bytearray(client_info.out_path)
                 packet.path_len = client_info.out_path_len
 
-            # Calculate ACK timeout
+            # Calculate ACK timeout from the HOP count, not the encoded byte
+            # (0x80 = empty 3-byte-hash path would otherwise give a ~4min wait)
             if route_type == "flood":
                 ack_timeout = PUSH_ACK_TIMEOUT_FLOOD_MS / 1000.0
             else:
-                path_len = client_info.out_path_len if client_info.out_path_len >= 0 else 0
+                hops = (
+                    PathUtils.get_path_hash_count(client_info.out_path_len)
+                    if client_info.out_path_len >= 0
+                    else 0
+                )
                 ack_timeout = (
-                    PUSH_TIMEOUT_BASE_MS + PUSH_ACK_TIMEOUT_FACTOR_MS * (path_len + 1)
+                    PUSH_TIMEOUT_BASE_MS + PUSH_ACK_TIMEOUT_FACTOR_MS * (hops + 1)
                 ) / 1000.0
 
             # Update client sync state with pending ACK
@@ -399,9 +407,16 @@ class RoomServer:
                 push_post_timestamp=post["post_timestamp"],
                 ack_timeout_time=time.time() + ack_timeout,
             )
-            # Send packet (dispatcher will track ACK automatically)
+            # Send and wait for the client's delivery ACK. The injector must be
+            # told the crypto ACK CRC we computed above — its default
+            # (packet.get_crc()) is a packet-hash CRC no client ever sends.
             # This blocks for the entire transmission duration (0.5-9 seconds)
-            success = await self.packet_injector(packet, wait_for_ack=True)
+            success = await self.packet_injector(
+                packet,
+                wait_for_ack=True,
+                expected_ack_crc=expected_ack_crc,
+                ack_timeout=ack_timeout,
+            )
 
             # SAFETY: Release transmission lock AFTER send completes
             self.global_limiter.release()

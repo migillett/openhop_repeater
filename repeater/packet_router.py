@@ -271,7 +271,14 @@ class PacketRouter:
                 pass
         await self.queue.put(packet)
 
-    async def inject_packet(self, packet, wait_for_ack: bool = False, origin_hash=None):
+    async def inject_packet(
+        self,
+        packet,
+        wait_for_ack: bool = False,
+        origin_hash=None,
+        expected_ack_crc=None,
+        ack_timeout=None,
+    ):
         try:
             metadata = {
                 "rssi": getattr(packet, "rssi", 0),
@@ -327,8 +334,16 @@ class PacketRouter:
                     dispatcher = getattr(self.daemon, "dispatcher", None)
                     if dispatcher and hasattr(dispatcher, "wait_for_ack"):
                         try:
-                            expected_crc = packet.get_crc()
-                            ack_ok = await dispatcher.wait_for_ack(expected_crc, timeout=5.0)
+                            # Callers that know the crypto ACK CRC (e.g. room
+                            # server pushes) must pass it: packet.get_crc() is a
+                            # packet-hash CRC that no ACK sender ever produces.
+                            expected_crc = (
+                                expected_ack_crc
+                                if expected_ack_crc is not None
+                                else packet.get_crc()
+                            )
+                            timeout = ack_timeout if ack_timeout is not None else 5.0
+                            ack_ok = await dispatcher.wait_for_ack(expected_crc, timeout=timeout)
                             if not ack_ok:
                                 logger.warning(
                                     "Injected packet ACK timeout (crc=%08X)", expected_crc
@@ -463,6 +478,20 @@ class PacketRouter:
                 self._record_for_ui(packet, metadata)
 
         elif payload_type == AckHandler.payload_type():
+            # Feed the dispatcher's ACK matching: the repeater registers no core
+            # AckHandler (all RX lands in this router via the fallback), so
+            # without this no dispatcher.wait_for_ack() — e.g. a room server
+            # push — can ever resolve. Covers RF ACKs and locally injected ones
+            # (companions hosted on this same instance never go over the air).
+            if packet.payload is not None and len(packet.payload) >= 4:
+                register_ack = getattr(
+                    getattr(self.daemon, "dispatcher", None), "_register_ack_received", None
+                )
+                if register_ack is not None:
+                    try:
+                        await register_ack(int.from_bytes(bytes(packet.payload[:4]), "little"))
+                    except Exception as e:
+                        logger.debug("ACK registration failed: %s", e)
             # ACK has no dest in payload (4-byte CRC only); deliver to all bridges so sender sees send_confirmed.
             # Do not set processed_by_injection so packet also reaches engine for DIRECT forwarding when we're a middle hop.
             companion_bridges = self._companion_bridges_for_packet(packet, metadata)
@@ -488,6 +517,19 @@ class PacketRouter:
         elif payload_type == PathHandler.payload_type():
             dest_hash = packet.payload[0] if packet.payload else None
             companion_bridges = self._companion_bridges_for_packet(packet, metadata)
+            # PATH addressed to a local server identity (room server/repeater):
+            # process for client out_path updates and any embedded ACK before
+            # bridge delivery. Previously the all-bridges branch below swallowed
+            # these whenever any companion was configured, so room servers never
+            # saw path returns — or the delivery ACKs firmware embeds in them.
+            path_helper = getattr(self.daemon, "path_helper", None)
+            is_local_identity_dest = (
+                path_helper is not None
+                and dest_hash is not None
+                and dest_hash in getattr(path_helper, "acl_dict", {})
+            )
+            if is_local_identity_dest:
+                await path_helper.process_path_packet(packet)
             if dest_hash is not None and dest_hash in companion_bridges:
                 if self._should_deliver_path_to_companions(packet):
                     await companion_bridges[dest_hash].process_received_packet(packet)
@@ -506,8 +548,8 @@ class PacketRouter:
                     len(companion_bridges),
                 )
                 # Do not set processed_by_injection so packet also reaches engine for DIRECT forwarding when we're a middle hop.
-            elif self.daemon.path_helper:
-                await self.daemon.path_helper.process_path_packet(packet)
+            elif path_helper and not is_local_identity_dest:
+                await path_helper.process_path_packet(packet)
 
         elif payload_type == LoginResponseHandler.payload_type():
             # PAYLOAD_TYPE_RESPONSE (0x01): payload is dest_hash(1)+src_hash(1)+encrypted.

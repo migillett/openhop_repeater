@@ -146,7 +146,12 @@ async def test_room_server_push_post_to_client_success_direct_route_sets_path_an
     assert ok is True
     assert bytes(packet.path) == b"\xaa\xbb"
     assert packet.path_len == 2
-    injector.assert_awaited_once_with(packet, wait_for_ack=True)
+    injector.assert_awaited_once_with(
+        packet,
+        wait_for_ack=True,
+        expected_ack_crc=int.from_bytes(b"\x01\x02\x03\x04", "little"),
+        ack_timeout=10.0,  # PUSH_TIMEOUT_BASE + FACTOR * (path_len 2 + 1)
+    )
     rs._handle_ack_received.assert_awaited_once_with(
         client.id.get_public_key(), post["post_timestamp"]
     )
@@ -174,9 +179,11 @@ async def test_room_server_push_expected_ack_matches_firmware_signed_ack():
 
     db = _FakeDB()
     sent = []
+    injector_kwargs = []
 
-    async def injector(packet, wait_for_ack=False):
+    async def injector(packet, wait_for_ack=False, **kwargs):
         sent.append(packet)
+        injector_kwargs.append(kwargs)
         return False  # no ACK: leaves the pending upsert as the only db write
 
     rs = RoomServer(
@@ -204,6 +211,11 @@ async def test_room_server_push_expected_ack_matches_firmware_signed_ack():
     upserts = [c.kwargs for c in db.upsert_client_sync.call_args_list if "pending_ack_crc" in c.kwargs]
     assert len(upserts) == 1
     expected_ack_crc = upserts[0]["pending_ack_crc"]
+
+    # The injector must be told the crypto CRC (and the computed timeout) so
+    # dispatcher.wait_for_ack matches the client's actual ACK.
+    assert injector_kwargs[0]["expected_ack_crc"] == expected_ack_crc
+    assert injector_kwargs[0]["ack_timeout"] > 0
 
     # Decrypt the pushed datagram and verify the signed-plain layout.
     pkt = sent[0]
