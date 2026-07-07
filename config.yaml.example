@@ -611,6 +611,28 @@ logging:
   # Log format
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
+# HTTP server configuration (web UI + API)
+http:
+  # Enable/disable the embedded HTTP server at runtime.
+  # Changes are applied live via ConfigManager (no daemon restart required).
+  enabled: true
+
+  # Listen address and port for the web UI/API server.
+  host: "0.0.0.0"
+  port: 8000
+
+  # CherryPy worker/thread tuning.
+  # thread_pool is the initial worker count (minimum enforced by server: 2).
+  thread_pool: 8
+  # thread_pool_max is the max worker count (always >= thread_pool).
+  thread_pool_max: 16
+
+  # Socket tuning.
+  # socket_timeout closes idle sockets so worker threads can be reused (min: 15 seconds).
+  socket_timeout: 65
+  # socket_queue_size controls pending TCP connection backlog (min: 10).
+  socket_queue_size: 100
+
 # Web interface configuration
 web:
   # Enable Cross-Origin Resource Sharing (CORS) headers

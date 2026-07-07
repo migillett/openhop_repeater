@@ -24,6 +24,7 @@ _connected_clients = set()
 PING_INTERVAL = 30  # seconds
 _heartbeat_thread = None
 _heartbeat_running = False
+_websocket_plugin = None
 
 
 class PacketWebSocket(WebSocket):
@@ -152,9 +153,20 @@ def _heartbeat_loop():
 
 def init_websocket():
     """Initialize WebSocket plugin and start heartbeat"""
-    global _heartbeat_thread, _heartbeat_running
+    global _heartbeat_thread, _heartbeat_running, _websocket_plugin
 
-    WebSocketPlugin(cherrypy.engine).subscribe()
+    # Re-initialize plugin safely across CherryPy stop/start cycles.
+    # ws4py's manager thread cannot be started twice, so always tear down
+    # any previously subscribed plugin instance before creating a new one.
+    if _websocket_plugin is not None:
+        try:
+            _websocket_plugin.unsubscribe()
+        except Exception as e:
+            logger.debug(f"WebSocket plugin unsubscribe during init failed: {e}")
+        _websocket_plugin = None
+
+    _websocket_plugin = WebSocketPlugin(cherrypy.engine)
+    _websocket_plugin.subscribe()
     cherrypy.tools.websocket = WebSocketTool()
 
     # Start heartbeat thread
@@ -165,3 +177,19 @@ def init_websocket():
         logger.info(f"WebSocket initialized with {PING_INTERVAL}s heartbeat")
     else:
         logger.info("WebSocket initialized")
+
+
+def shutdown_websocket():
+    """Stop websocket heartbeat and unsubscribe plugin for clean restart."""
+    global _heartbeat_running, _heartbeat_thread, _websocket_plugin
+
+    _heartbeat_running = False
+    _heartbeat_thread = None
+    _connected_clients.clear()
+
+    if _websocket_plugin is not None:
+        try:
+            _websocket_plugin.unsubscribe()
+        except Exception as e:
+            logger.debug(f"WebSocket plugin unsubscribe failed: {e}")
+        _websocket_plugin = None

@@ -426,6 +426,7 @@ class SQLiteHandler:
                                 is_channel INTEGER NOT NULL DEFAULT 0,
                                 channel_idx INTEGER NOT NULL DEFAULT 0,
                                 path_len INTEGER NOT NULL DEFAULT 0,
+                                sender_prefix TEXT NOT NULL DEFAULT '',
                                 packet_hash TEXT,
                                 created_at REAL NOT NULL
                             )
@@ -581,6 +582,30 @@ class SQLiteHandler:
                     )
                     logger.info(f"Migration '{migration_name}' applied successfully")
 
+                # Migration 10: Add sender_prefix column (hex text) to
+                # companion_messages.  TXT_TYPE_SIGNED_PLAIN room posts carry a
+                # 4-byte author pubkey prefix; without it, posts replayed from
+                # SQLite show a zero-padded author in the app frame.
+                migration_name = "add_sender_prefix_to_companion_messages"
+                existing = conn.execute(
+                    "SELECT migration_name FROM migrations WHERE migration_name = ?",
+                    (migration_name,),
+                ).fetchone()
+                if not existing:
+                    cursor = conn.execute("PRAGMA table_info(companion_messages)")
+                    columns = [column[1] for column in cursor.fetchall()]
+                    if "sender_prefix" not in columns:
+                        conn.execute(
+                            "ALTER TABLE companion_messages "
+                            "ADD COLUMN sender_prefix TEXT NOT NULL DEFAULT ''"
+                        )
+                        logger.info("Added sender_prefix column to companion_messages table")
+                    conn.execute(
+                        "INSERT INTO migrations (migration_name, applied_at) VALUES (?, ?)",
+                        (migration_name, time.time()),
+                    )
+                    logger.info(f"Migration '{migration_name}' applied successfully")
+
                 conn.commit()
 
         except Exception as e:
@@ -671,7 +696,7 @@ class SQLiteHandler:
                 except Exception:
                     fwd_path_val = str(fwd_path)
 
-                conn.execute(
+                cursor = conn.execute(
                     """
                     INSERT INTO packets (
                         timestamp, type, route, length, rssi, snr, score,
@@ -714,6 +739,7 @@ class SQLiteHandler:
                     ),
                 )
                 self._invalidate_hot_caches()
+                return cursor.lastrowid
 
         except Exception as e:
             logger.error(f"Failed to store packet in SQLite: {e}")
@@ -992,6 +1018,7 @@ class SQLiteHandler:
                 packets = conn.execute(
                     """
                     SELECT
+                        id,
                         timestamp, type, route, length, rssi, snr, score,
                         transmitted, is_duplicate, drop_reason, src_hash, dst_hash, path_hash,
                         transport_codes, payload, payload_length,
@@ -1044,6 +1071,7 @@ class SQLiteHandler:
 
                 base_query = """
                     SELECT
+                        id,
                         timestamp, type, route, length, rssi, snr, score,
                         transmitted, is_duplicate, drop_reason, src_hash, dst_hash, path_hash,
                         transport_codes, payload, payload_length,
@@ -1176,6 +1204,7 @@ class SQLiteHandler:
                 packet = conn.execute(
                     """
                     SELECT
+                        id,
                         timestamp, type, route, length, rssi, snr, score,
                         transmitted, is_duplicate, drop_reason, src_hash, dst_hash, path_hash,
                         header, transport_codes, payload, payload_length,
@@ -1191,6 +1220,32 @@ class SQLiteHandler:
 
         except Exception as e:
             logger.error(f"Failed to get packet by hash: {e}")
+            return None
+
+    def get_packet_by_id(self, packet_id: int) -> Optional[dict]:
+        try:
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+
+                packet = conn.execute(
+                    """
+                    SELECT
+                        id,
+                        timestamp, type, route, length, rssi, snr, score,
+                        transmitted, is_duplicate, drop_reason, src_hash, dst_hash, path_hash,
+                        header, transport_codes, payload, payload_length,
+                        tx_delay_ms, packet_hash, original_path, forwarded_path, raw_packet,
+                        lbt_attempts, lbt_backoff_delays_ms, lbt_channel_busy
+                    FROM packets
+                    WHERE id = ?
+                """,
+                    (packet_id,),
+                ).fetchone()
+
+                return dict(packet) if packet else None
+
+        except Exception as e:
+            logger.error(f"Failed to get packet by id: {e}")
             return None
 
     def get_packet_type_stats(self, hours: int = 24) -> dict:
@@ -2139,29 +2194,32 @@ class SQLiteHandler:
             return []
 
     def upsert_client_sync(self, room_hash: str, client_pubkey: str, **kwargs) -> bool:
-        """Insert or update client sync state using single upsert operation."""
+        """Insert or update client sync state without clobbering unspecified fields."""
         try:
             with self._connect() as conn:
                 now = time.time()
-                kwargs["updated_at"] = now
+                update_fields = dict(kwargs)
+                update_fields["updated_at"] = now
 
-                # Set defaults for insert path
-                kwargs.setdefault("sync_since", 0)
-                kwargs.setdefault("pending_ack_crc", 0)
-                kwargs.setdefault("push_post_timestamp", 0)
-                kwargs.setdefault("ack_timeout_time", 0)
-                kwargs.setdefault("push_failures", 0)
-                kwargs.setdefault("last_activity", now)
+                # INSERT must satisfy NOT NULL columns (last_activity), while
+                # ON CONFLICT updates should only touch supplied fields.
+                insert_fields = dict(update_fields)
+                if insert_fields.get("last_activity") is None:
+                    insert_fields["last_activity"] = now
 
-                columns = ["room_hash", "client_pubkey"] + list(kwargs.keys())
+                columns = ["room_hash", "client_pubkey"] + list(insert_fields.keys())
                 placeholders = ["?"] * len(columns)
-                values = [room_hash, client_pubkey] + list(kwargs.values())
+                values = [room_hash, client_pubkey] + list(insert_fields.values())
 
-                # Use INSERT OR REPLACE for single atomic upsert
+                # Update only supplied columns on conflict so partial updates don't
+                # reset counters/state such as push_failures.
+                update_set = ", ".join(f"{col}=excluded.{col}" for col in update_fields.keys())
                 conn.execute(
                     f"""
-                    INSERT OR REPLACE INTO room_client_sync ({", ".join(columns)})
+                    INSERT INTO room_client_sync ({", ".join(columns)})
                     VALUES ({", ".join(placeholders)})
+                    ON CONFLICT(room_hash, client_pubkey)
+                    DO UPDATE SET {update_set}
                 """,
                     values,
                 )
@@ -2367,8 +2425,12 @@ class SQLiteHandler:
             logger.error(f"Failed to count companion contacts: {e}")
             return 0
 
-    def companion_load_contacts(self, companion_hash: str) -> List[Dict]:
-        """Load contacts for a companion from storage."""
+    def companion_load_contacts(self, companion_hash: str) -> Optional[List[Dict]]:
+        """Load contacts for a companion from storage.
+
+        Returns [] when the companion has no persisted contacts, or None when
+        the load failed — callers must not treat a failed load as "no data".
+        """
         try:
             with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
@@ -2382,8 +2444,8 @@ class SQLiteHandler:
                 )
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Failed to load companion contacts: {e}")
-            return []
+            logger.error(f"Failed to load companion contacts for {companion_hash}: {e}")
+            return None
 
     def companion_save_contacts(self, companion_hash: str, contacts: List[Dict]) -> bool:
         """Replace all contacts for a companion in storage using batch insert."""
@@ -2594,8 +2656,26 @@ class SQLiteHandler:
             logger.error(f"Failed to save companion prefs: {e}")
             return False
 
-    def companion_load_channels(self, companion_hash: str) -> List[Dict]:
-        """Load channels for a companion from storage."""
+    def companion_count_channels(self, companion_hash: str) -> int:
+        """Return the number of persisted channels for a companion."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM companion_channels WHERE companion_hash = ?",
+                    (companion_hash,),
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error(f"Failed to count companion channels: {e}")
+            return 0
+
+    def companion_load_channels(self, companion_hash: str) -> Optional[List[Dict]]:
+        """Load channels for a companion from storage.
+
+        Returns [] when the companion has no persisted channels, or None when
+        the load failed — callers must not treat a failed load as "no data".
+        """
         try:
             with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
@@ -2608,8 +2688,8 @@ class SQLiteHandler:
                 )
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Failed to load companion channels: {e}")
-            return []
+            logger.error(f"Failed to load companion channels for {companion_hash}: {e}")
+            return None
 
     def companion_save_channels(self, companion_hash: str, channels: List[Dict]) -> bool:
         """Replace all channels for a companion in storage using batch insert."""
@@ -2645,23 +2725,45 @@ class SQLiteHandler:
             logger.error(f"Failed to save companion channels: {e}")
             return False
 
-    def companion_load_messages(self, companion_hash: str, limit: int = 100) -> List[Dict]:
-        """Load queued messages for a companion (oldest first for queue order)."""
+    def companion_count_messages(self, companion_hash: str) -> int:
+        """Return the number of persisted queued messages for a companion."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM companion_messages WHERE companion_hash = ?",
+                    (companion_hash,),
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error(f"Failed to count companion messages: {e}")
+            return 0
+
+    def companion_load_messages(self, companion_hash: str, limit: int = 100) -> Optional[List[Dict]]:
+        """Load queued messages for a companion (oldest first for queue order).
+
+        Returns [] when the companion has no persisted messages, or None when
+        the load failed — callers must not treat a failed load as "no data".
+        """
         try:
             with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute(
                     """
-                    SELECT sender_key, txt_type, timestamp, text, is_channel, channel_idx, path_len
+                    SELECT sender_key, txt_type, timestamp, text, is_channel, channel_idx,
+                           path_len, sender_prefix
                     FROM companion_messages WHERE companion_hash = ?
                     ORDER BY created_at ASC LIMIT ?
                 """,
                     (companion_hash, limit),
                 )
-                return [dict(row) for row in cursor.fetchall()]
+                rows = [dict(row) for row in cursor.fetchall()]
+                for msg in rows:
+                    msg["sender_prefix"] = bytes.fromhex(msg.get("sender_prefix") or "")
+                return rows
         except Exception as e:
-            logger.error(f"Failed to load companion messages: {e}")
-            return []
+            logger.error(f"Failed to load companion messages for {companion_hash}: {e}")
+            return None
 
     def companion_push_message(
         self, companion_hash: str, msg: Dict, max_messages: Optional[int] = None
@@ -2683,13 +2785,16 @@ class SQLiteHandler:
             if isinstance(packet_hash, bytes):
                 packet_hash = packet_hash.decode("utf-8", errors="replace") if packet_hash else None
             sender_key = msg.get("sender_key", b"")
+            sender_prefix = msg.get("sender_prefix", b"")
+            if not isinstance(sender_prefix, str):
+                sender_prefix = bytes(sender_prefix or b"").hex()
             with self._connect() as conn:
                 cursor = conn.execute(
                     """
                     INSERT OR IGNORE INTO companion_messages
                     (companion_hash, sender_key, txt_type, timestamp, text,
-                     is_channel, channel_idx, path_len, packet_hash, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     is_channel, channel_idx, path_len, sender_prefix, packet_hash, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         companion_hash,
@@ -2700,6 +2805,7 @@ class SQLiteHandler:
                         int(msg.get("is_channel", False)),
                         msg.get("channel_idx", 0),
                         msg.get("path_len", 0),
+                        sender_prefix,
                         packet_hash,
                         time.time(),
                     ),
@@ -2732,7 +2838,8 @@ class SQLiteHandler:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute(
                     """
-                    SELECT id, sender_key, txt_type, timestamp, text, is_channel, channel_idx, path_len
+                    SELECT id, sender_key, txt_type, timestamp, text, is_channel, channel_idx,
+                           path_len, sender_prefix
                     FROM companion_messages WHERE companion_hash = ?
                     ORDER BY created_at ASC LIMIT 1
                 """,
@@ -2742,6 +2849,7 @@ class SQLiteHandler:
                 if not row:
                     return None
                 msg = dict(row)
+                msg["sender_prefix"] = bytes.fromhex(msg.get("sender_prefix") or "")
                 conn.execute("DELETE FROM companion_messages WHERE id = ?", (msg["id"],))
                 conn.commit()
                 return {k: v for k, v in msg.items() if k != "id"}

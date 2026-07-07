@@ -1,7 +1,7 @@
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, mock_open, patch
-from concurrent.futures import TimeoutError as FutureTimeoutError
 
 import cherrypy
 import pytest
@@ -23,6 +23,61 @@ def _make_api(config=None):
 
 def _attach_storage(api, storage):
     api.daemon_instance = SimpleNamespace(repeater_handler=SimpleNamespace(storage=storage))
+
+
+class _FakeDiscoveryHelper:
+    def __init__(self):
+        self.cleanup_called = False
+        self.started_sessions = []
+        self._session = {
+            "session_id": "sess-1",
+            "tag": 123,
+            "status": "created",
+            "timeout": 5.0,
+            "filter_mask": 0x04,
+            "since": 0,
+            "prefix_only": False,
+            "created_at": 1.0,
+            "started_at": None,
+            "completed_at": None,
+            "count": 0,
+            "error": None,
+        }
+        self._events = [
+            {"id": 1, "event": "started", "data": {"session_id": "sess-1"}},
+            {
+                "id": 2,
+                "event": "discovery_result",
+                "data": {"session_id": "sess-1", "result": {"pub_key": "aa" * 32}},
+            },
+            {"id": 3, "event": "completed", "data": {"session_id": "sess-1", "count": 1}},
+        ]
+
+    def cleanup_sessions(self):
+        self.cleanup_called = True
+
+    def create_session(self, **kwargs):
+        self._session.update(
+            {
+                "timeout": kwargs["timeout"],
+                "filter_mask": kwargs["filter_mask"],
+                "since": kwargs["since"],
+                "prefix_only": kwargs["prefix_only"],
+            }
+        )
+        return dict(self._session)
+
+    def start_session_task(self, session_id):
+        self.started_sessions.append(session_id)
+
+    def get_session_snapshot(self, session_id):
+        return dict(self._session) if session_id == self._session["session_id"] else None
+
+    def get_events_since(self, session_id, last_event_id=0):
+        if session_id != self._session["session_id"]:
+            return None
+        events = [event for event in self._events if event["id"] > last_event_id]
+        return {"events": events, "completed": True, "status": "completed", "latest_event_id": 3}
 
 
 @pytest.fixture
@@ -146,6 +201,134 @@ def test_success_and_error_helpers():
 
     assert ok == {"success": True, "data": [1, 2], "source": "unit"}
     assert err == {"success": False, "error": "boom"}
+
+
+def test_discover_neighbors_start_schedules_session(cherrypy_ctx):
+    request, _ = cherrypy_ctx
+    request.method = "POST"
+    request.json = {"timeout": 7, "filter_mask": 0x04, "since": 0, "prefix_only": False}
+
+    helper = _FakeDiscoveryHelper()
+    loop = MagicMock()
+    api = _make_api()
+    api.event_loop = loop
+    api.daemon_instance = SimpleNamespace(discovery_helper=helper)
+
+    result = api.discover_neighbors_start()
+
+    assert result["success"] is True
+    assert result["data"]["session_id"] == "sess-1"
+    assert helper.cleanup_called is True
+    loop.call_soon_threadsafe.assert_called_once()
+
+
+def test_discover_neighbors_stream_yields_session_events(cherrypy_ctx):
+    request, response = cherrypy_ctx
+    request.method = "GET"
+
+    helper = _FakeDiscoveryHelper()
+    api = _make_api()
+    api.daemon_instance = SimpleNamespace(discovery_helper=helper)
+
+    stream = api.discover_neighbors_stream(session_id="sess-1")
+    payload = "".join(list(stream))
+
+    assert response.headers["Content-Type"] == "text/event-stream"
+    assert "event: connected" in payload
+    assert "event: started" in payload
+    assert "event: discovery_result" in payload
+    assert "event: completed" in payload
+
+
+def test_add_discovered_neighbor_records_zero_hop_advert(cherrypy_ctx, monkeypatch):
+    request, _ = cherrypy_ctx
+    request.method = "POST"
+    request.headers = {"Authorization": "Bearer test-token"}
+    request.path_info = "/api/add_discovered_neighbor"
+    request.json = {
+        "pub_key": "aa" * 32,
+        "node_name": "Field Repeater",
+        "node_type": 2,
+        "rssi": -71,
+        "response_snr": 4.5,
+    }
+
+    jwt_handler = MagicMock()
+    jwt_handler.verify_jwt.return_value = {"sub": "tester", "client_id": "ui"}
+    token_manager = MagicMock()
+    monkeypatch.setattr(
+        cherrypy,
+        "config",
+        {"jwt_handler": jwt_handler, "token_manager": token_manager},
+        raising=False,
+    )
+
+    storage = MagicMock()
+    api = _make_api()
+    api._enrich_discovery_result = lambda result: {**result, "known_neighbor": True}
+    _attach_storage(api, storage)
+
+    result = api.add_discovered_neighbor()
+
+    assert result["success"] is True
+    storage.record_advert.assert_called_once()
+    advert_record = storage.record_advert.call_args.args[0]
+    assert advert_record["route_type"] == 2
+    assert advert_record["zero_hop"] is True
+    assert advert_record["contact_type"] == "Repeater"
+
+
+def test_add_discovered_neighbor_normalizes_unknown_name(cherrypy_ctx, monkeypatch):
+    request, _ = cherrypy_ctx
+    request.method = "POST"
+    request.headers = {"Authorization": "Bearer test-token"}
+    request.path_info = "/api/add_discovered_neighbor"
+    request.json = {
+        "pub_key": "bb" * 32,
+        "node_name": "Unknown Node",
+        "node_type": 2,
+    }
+
+    jwt_handler = MagicMock()
+    jwt_handler.verify_jwt.return_value = {"sub": "tester", "client_id": "ui"}
+    token_manager = MagicMock()
+    monkeypatch.setattr(
+        cherrypy,
+        "config",
+        {"jwt_handler": jwt_handler, "token_manager": token_manager},
+        raising=False,
+    )
+
+    storage = MagicMock()
+    api = _make_api()
+    api._enrich_discovery_result = lambda result: result
+    _attach_storage(api, storage)
+
+    result = api.add_discovered_neighbor()
+
+    assert result["success"] is True
+    advert_record = storage.record_advert.call_args.args[0]
+    assert advert_record["node_name"] is None
+
+
+def test_enrich_discovery_result_treats_placeholder_name_as_unknown():
+    api = _make_api()
+
+    storage = MagicMock()
+    storage.get_neighbors.return_value = {}
+    storage.get_node_name_by_pubkey.return_value = "Unknown"
+    _attach_storage(api, storage)
+
+    result = api._enrich_discovery_result(
+        {
+            "pub_key": "cc" * 32,
+            "node_name": "Unknown Node",
+            "node_type": 2,
+        }
+    )
+
+    assert result["known_neighbor"] is False
+    assert result["node_name"] is None
 
 
 def test_get_time_range_uses_current_time(monkeypatch):
