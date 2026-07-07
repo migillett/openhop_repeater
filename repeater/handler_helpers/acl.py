@@ -106,13 +106,27 @@ class ACL:
         if not password:
             client = self.clients.get(pub_key)
             if client is None:
-                if self.allow_read_only:
-                    logger.info("Blank password, allowing read-only guest access")
-                    return True, PERM_ACL_GUEST
-                else:
+                if not self.allow_read_only:
                     logger.info("Blank password, sender not in ACL and read-only disabled")
                     return False, 0
-            logger.info(f"ACL-based login for {pub_key[:6].hex()}...")
+                if len(self.clients) >= self.max_clients:
+                    logger.warning("ACL full, cannot add read-only guest")
+                    return False, 0
+                # Read-only guests must still land in the ACL: the room server's
+                # text handler and sync loop only see ACL members, so an absent
+                # entry means the client's posts are silently dropped (never
+                # decrypted or ACKed) and posts are never pushed to it.
+                client = ClientInfo(client_identity, PERM_ACL_GUEST)
+                self.clients[pub_key] = client
+                logger.info(f"Blank password, added read-only guest {pub_key[:6].hex()}...")
+            else:
+                logger.info(f"ACL-based login for {pub_key[:6].hex()}...")
+            client.last_activity = int(time.time())
+            client.last_login_success = int(time.time())
+            client.shared_secret = shared_secret
+            if sync_since is not None:
+                client.sync_since = sync_since
+                logger.debug(f"Stored sync_since={sync_since} for client")
             return True, client.permissions
 
         permissions = 0
