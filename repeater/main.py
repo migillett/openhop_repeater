@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import inspect
 import logging
 import os
 import signal
@@ -780,6 +781,17 @@ class RepeaterDaemon:
                 limit=retention or 100,
             )
             loaded_messages = len(message_rows)
+            # openhop_core < the sender_prefix change (paired with fd43d86) has no
+            # QueuedMessage.sender_prefix; drop the prefix there instead of failing init.
+            supports_sender_prefix = "sender_prefix" in inspect.signature(QueuedMessage).parameters
+            if message_rows and not supports_sender_prefix:
+                logger.warning(
+                    "Companion %s ('%s'): installed openhop_core QueuedMessage has no "
+                    "sender_prefix field; persisted sender prefixes will be dropped "
+                    "(update openhop_core to restore signed room-post authors)",
+                    companion_hash_str,
+                    name,
+                )
             for msg_dict in message_rows:
                 sk = msg_dict.get("sender_key", b"")
                 if isinstance(sk, str):
@@ -787,18 +799,18 @@ class RepeaterDaemon:
                 sp = msg_dict.get("sender_prefix", b"")
                 if isinstance(sp, str):
                     sp = bytes.fromhex(sp) if sp else b""
-                bridge.message_queue.push(
-                    QueuedMessage(
-                        sender_key=sk,
-                        txt_type=msg_dict.get("txt_type", 0),
-                        timestamp=msg_dict.get("timestamp", 0),
-                        text=msg_dict.get("text", ""),
-                        is_channel=bool(msg_dict.get("is_channel", False)),
-                        channel_idx=msg_dict.get("channel_idx", 0),
-                        path_len=msg_dict.get("path_len", 0),
-                        sender_prefix=sp,
-                    )
+                msg_kwargs = dict(
+                    sender_key=sk,
+                    txt_type=msg_dict.get("txt_type", 0),
+                    timestamp=msg_dict.get("timestamp", 0),
+                    text=msg_dict.get("text", ""),
+                    is_channel=bool(msg_dict.get("is_channel", False)),
+                    channel_idx=msg_dict.get("channel_idx", 0),
+                    path_len=msg_dict.get("path_len", 0),
                 )
+                if supports_sender_prefix:
+                    msg_kwargs["sender_prefix"] = sp
+                bridge.message_queue.push(QueuedMessage(**msg_kwargs))
 
         logger.info(
             "Companion %s ('%s'): restored %d/%d contact(s), %d/%d channel(s), "

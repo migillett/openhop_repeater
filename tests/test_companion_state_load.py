@@ -129,6 +129,41 @@ class TestRestoreCompanionState:
         assert any("rejected persisted channel" in r.message for r in caplog.records)
 
     @pytest.mark.asyncio
+    async def test_old_core_without_sender_prefix_drops_prefix(self, caplog):
+        # openhop_core releases before the sender_prefix change reject the kwarg;
+        # message restore must degrade (drop the prefix) instead of failing init.
+        from dataclasses import dataclass, field
+
+        @dataclass
+        class LegacyQueuedMessage:
+            sender_key: bytes = b""
+            txt_type: int = 0
+            timestamp: int = 0
+            text: str = ""
+            is_channel: bool = False
+            channel_idx: int = 0
+            path_len: int = 0
+            snr: float = 0.0
+            rssi: int = 0
+            channel_data_payload: bytes = field(default=b"")
+
+        daemon = self._daemon()
+        bridge = self._bridge()
+        sqlite = self._sqlite(
+            messages=[{"sender_key": b"", "text": "hi", "sender_prefix": b"\xab\xcd"}]
+        )
+        with (
+            patch("openhop_core.companion.models.QueuedMessage", LegacyQueuedMessage),
+            caplog.at_level(logging.WARNING),
+        ):
+            await daemon._restore_companion_state(sqlite, bridge, _HASH, _NAME)
+        bridge.message_queue.push.assert_called_once()
+        pushed = bridge.message_queue.push.call_args[0][0]
+        assert isinstance(pushed, LegacyQueuedMessage)
+        assert pushed.text == "hi"
+        assert any("sender prefixes will be dropped" in r.message for r in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_zero_retention_skips_message_load(self):
         daemon = self._daemon()
         bridge = self._bridge(max_size=0)
