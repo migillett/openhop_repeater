@@ -27,6 +27,7 @@ try:
     from repeater.data_acquisition.websocket_handler import (
         PacketWebSocket,
         init_websocket,
+        shutdown_websocket,
     )
 
     from .companion_ws_proxy import CompanionFrameWebSocket
@@ -636,6 +637,11 @@ class HTTPStatsServer:
 
     def stop(self):
         try:
+            if WEBSOCKET_AVAILABLE:
+                try:
+                    shutdown_websocket()
+                except Exception as e:
+                    logger.debug(f"WebSocket shutdown skipped/failed: {e}")
             cherrypy.engine.exit()
             logger.info("HTTP stats server stopped")
         except Exception as e:
