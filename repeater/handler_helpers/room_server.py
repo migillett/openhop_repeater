@@ -357,10 +357,11 @@ class RoomServer:
                 timestamp.to_bytes(4, "little") + bytes([flags]) + author_prefix + message_bytes
             )
 
-            # Calculate expected ACK (same algorithm as openhop_core)
-            attempt = 0
-            pack_data = PacketBuilder._pack_timestamp_data(timestamp, attempt, message_bytes)
-            ack_hash = CryptoUtils.sha256(pack_data + client_info.id.get_public_key())[:4]
+            # Expected ACK: signed-plain receivers (firmware
+            # BaseChatMesh::onPeerDataRecv, and openhop_core's text handler)
+            # ack with sha256(decrypted[0 : 9 + strlen(text)] || client_pubkey)[:4]
+            # — exactly the timestamp+flags+author_prefix+text span built above.
+            ack_hash = CryptoUtils.sha256(plaintext + client_info.id.get_public_key())[:4]
             expected_ack_crc = int.from_bytes(ack_hash, "little")
 
             # Determine routing based on stored out_path
