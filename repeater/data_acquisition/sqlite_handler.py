@@ -2392,8 +2392,12 @@ class SQLiteHandler:
             logger.error(f"Failed to count companion contacts: {e}")
             return 0
 
-    def companion_load_contacts(self, companion_hash: str) -> List[Dict]:
-        """Load contacts for a companion from storage."""
+    def companion_load_contacts(self, companion_hash: str) -> Optional[List[Dict]]:
+        """Load contacts for a companion from storage.
+
+        Returns [] when the companion has no persisted contacts, or None when
+        the load failed — callers must not treat a failed load as "no data".
+        """
         try:
             with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
@@ -2407,8 +2411,8 @@ class SQLiteHandler:
                 )
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Failed to load companion contacts: {e}")
-            return []
+            logger.error(f"Failed to load companion contacts for {companion_hash}: {e}")
+            return None
 
     def companion_save_contacts(self, companion_hash: str, contacts: List[Dict]) -> bool:
         """Replace all contacts for a companion in storage using batch insert."""
@@ -2619,8 +2623,26 @@ class SQLiteHandler:
             logger.error(f"Failed to save companion prefs: {e}")
             return False
 
-    def companion_load_channels(self, companion_hash: str) -> List[Dict]:
-        """Load channels for a companion from storage."""
+    def companion_count_channels(self, companion_hash: str) -> int:
+        """Return the number of persisted channels for a companion."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM companion_channels WHERE companion_hash = ?",
+                    (companion_hash,),
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error(f"Failed to count companion channels: {e}")
+            return 0
+
+    def companion_load_channels(self, companion_hash: str) -> Optional[List[Dict]]:
+        """Load channels for a companion from storage.
+
+        Returns [] when the companion has no persisted channels, or None when
+        the load failed — callers must not treat a failed load as "no data".
+        """
         try:
             with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
@@ -2633,8 +2655,8 @@ class SQLiteHandler:
                 )
                 return [dict(row) for row in cursor.fetchall()]
         except Exception as e:
-            logger.error(f"Failed to load companion channels: {e}")
-            return []
+            logger.error(f"Failed to load companion channels for {companion_hash}: {e}")
+            return None
 
     def companion_save_channels(self, companion_hash: str, channels: List[Dict]) -> bool:
         """Replace all channels for a companion in storage using batch insert."""
@@ -2670,8 +2692,26 @@ class SQLiteHandler:
             logger.error(f"Failed to save companion channels: {e}")
             return False
 
-    def companion_load_messages(self, companion_hash: str, limit: int = 100) -> List[Dict]:
-        """Load queued messages for a companion (oldest first for queue order)."""
+    def companion_count_messages(self, companion_hash: str) -> int:
+        """Return the number of persisted queued messages for a companion."""
+        try:
+            with self._connect() as conn:
+                cursor = conn.execute(
+                    "SELECT COUNT(*) FROM companion_messages WHERE companion_hash = ?",
+                    (companion_hash,),
+                )
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            logger.error(f"Failed to count companion messages: {e}")
+            return 0
+
+    def companion_load_messages(self, companion_hash: str, limit: int = 100) -> Optional[List[Dict]]:
+        """Load queued messages for a companion (oldest first for queue order).
+
+        Returns [] when the companion has no persisted messages, or None when
+        the load failed — callers must not treat a failed load as "no data".
+        """
         try:
             with self._connect() as conn:
                 conn.row_factory = sqlite3.Row
@@ -2689,8 +2729,8 @@ class SQLiteHandler:
                     msg["sender_prefix"] = bytes.fromhex(msg.get("sender_prefix") or "")
                 return rows
         except Exception as e:
-            logger.error(f"Failed to load companion messages: {e}")
-            return []
+            logger.error(f"Failed to load companion messages for {companion_hash}: {e}")
+            return None
 
     def companion_push_message(
         self, companion_hash: str, msg: Dict, max_messages: Optional[int] = None
