@@ -1541,6 +1541,61 @@ paths:
               schema:
                 $ref: '#/components/schemas/SuccessResponse'
 
+  /default_region:
+    get:
+      tags: [Network Policy]
+      summary: Get default region
+      description: Get current mesh default region used for locally-originated flood adverts.
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Current default region
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      default_region:
+                        type: string
+                        nullable: true
+                  message:
+                    type: string
+                  error:
+                    type: string
+    post:
+      tags: [Network Policy]
+      summary: Update default region
+      description: Set or clear mesh default region. Pass null to clear.
+      security:
+        - BearerAuth: []
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [default_region]
+              properties:
+                default_region:
+                  type: string
+                  nullable: true
+                  description: Region name to set, or null to clear.
+      responses:
+        '200':
+          description: Default region updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
   /ping_neighbor:
     post:
       tags: [Network Policy]

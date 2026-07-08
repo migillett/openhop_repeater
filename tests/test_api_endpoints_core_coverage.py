@@ -1,7 +1,8 @@
+import asyncio
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import AsyncMock, MagicMock, mock_open, patch
 
 import cherrypy
 import pytest
@@ -309,6 +310,43 @@ def test_add_discovered_neighbor_normalizes_unknown_name(cherrypy_ctx, monkeypat
     assert result["success"] is True
     advert_record = storage.record_advert.call_args.args[0]
     assert advert_record["node_name"] is None
+
+
+def test_add_discovered_neighbor_skips_local_node(cherrypy_ctx, monkeypatch):
+    request, _ = cherrypy_ctx
+    request.method = "POST"
+    request.headers = {"Authorization": "Bearer test-token"}
+    request.path_info = "/api/add_discovered_neighbor"
+    request.json = {
+        "pub_key": "aa" * 32,
+        "node_name": "Self",
+        "node_type": 2,
+    }
+
+    jwt_handler = MagicMock()
+    jwt_handler.verify_jwt.return_value = {"sub": "tester", "client_id": "ui"}
+    token_manager = MagicMock()
+    monkeypatch.setattr(
+        cherrypy,
+        "config",
+        {"jwt_handler": jwt_handler, "token_manager": token_manager},
+        raising=False,
+    )
+
+    storage = MagicMock()
+    api = _make_api()
+    api._enrich_discovery_result = APIEndpoints._enrich_discovery_result.__get__(api, APIEndpoints)
+    _attach_storage(api, storage)
+    api.daemon_instance.local_identity = SimpleNamespace(
+        get_public_key=lambda: bytes.fromhex("aa" * 32)
+    )
+
+    result = api.add_discovered_neighbor()
+
+    assert result["success"] is True
+    assert "Skipped local node" in result["message"]
+    assert result["data"]["is_self"] is True
+    storage.record_advert.assert_not_called()
 
 
 def test_enrich_discovery_result_treats_placeholder_name_as_unknown():
@@ -1473,6 +1511,41 @@ def test_send_advert_paths(cherrypy_ctx):
     future_timeout.cancel.assert_called_once()
 
 
+def test_room_server_advert_applies_default_region_scope():
+    from openhop_core.protocol.constants import ROUTE_TYPE_FLOOD, ROUTE_TYPE_TRANSPORT_FLOOD
+
+    api = _make_api({"mesh": {"default_region": "alpha"}, "repeater": {}})
+    dispatcher = SimpleNamespace(send_packet=AsyncMock())
+    api.daemon_instance = SimpleNamespace(dispatcher=dispatcher, repeater_handler=None)
+
+    packet = SimpleNamespace(
+        header=ROUTE_TYPE_FLOOD,
+        transport_codes=[0, 0],
+        get_payload_type=lambda: 3,
+        get_payload=lambda: b"room_server_advert_payload",
+    )
+
+    with (
+        patch("openhop_core.protocol.PacketBuilder.create_advert", return_value=packet),
+        patch("openhop_core.protocol.transport_keys.get_auto_key_for", return_value=b"\x01" * 16),
+        patch("openhop_core.protocol.transport_keys.calc_transport_code", return_value=0xCAFE),
+    ):
+        result = asyncio.run(
+            api._send_room_server_advert_async(
+                identity=SimpleNamespace(),
+                node_name="RoomAlpha",
+                latitude=1.0,
+                longitude=2.0,
+                disable_fwd=False,
+            )
+        )
+
+    assert result is True
+    assert packet.transport_codes == [0xCAFE, 0]
+    assert (packet.header & 0x03) == ROUTE_TYPE_TRANSPORT_FLOOD
+    dispatcher.send_packet.assert_awaited_once_with(packet, wait_for_ack=False)
+
+
 def test_set_mode_and_set_duty_cycle_paths(cherrypy_ctx):
     request, _ = cherrypy_ctx
     api = _make_api({"repeater": {}, "duty_cycle": {}})
@@ -1757,18 +1830,70 @@ def test_transport_keys_and_transport_key_and_unscoped_policy(cherrypy_ctx):
     request.method = "GET"
     assert api.unscoped_flood_policy()["success"] is False
 
+    got_default = api.default_region()
+    assert got_default["success"] is True
+    assert got_default["data"]["default_region"] is None
+
     request.method = "POST"
     request.json = {}
     assert api.unscoped_flood_policy()["success"] is False
 
+    request.json = {}
+    assert api.default_region()["success"] is False
+
     request.json = {"unscoped_flood_allow": "yes"}
     assert api.unscoped_flood_policy()["success"] is False
+
+    request.json = {"default_region": "alpha"}
+    set_default = api.default_region()
+    assert set_default["success"] is True
+    assert api.config["mesh"]["default_region"] == "alpha"
+    assert any(
+        call.args and call.args[0] == "alpha" and call.args[1] == "allow"
+        for call in storage.create_transport_key.call_args_list
+    )
+
+    request.method = "GET"
+    got_default_after = api.default_region()
+    assert got_default_after["success"] is True
+    assert got_default_after["data"]["default_region"] == "alpha"
+
+    request.method = "POST"
+    request.json = {"default_region": None}
+    clear_default = api.default_region()
+    assert clear_default["success"] is True
+    assert api.config["mesh"]["default_region"] is None
 
     api.config_manager.save_to_file.return_value = True
     request.json = {"unscoped_flood_allow": True}
     ok = api.unscoped_flood_policy()
     assert ok["success"] is True
     assert api.config["mesh"]["unscoped_flood_allow"] is True
+
+
+def test_update_radio_config_owner_info_and_mesh_fields(cherrypy_ctx):
+    request, _ = cherrypy_ctx
+    request.method = "POST"
+    request.json = {
+        "owner_info": "Alice|Ops",
+        "path_hash_mode": 2,
+        "loop_detect": "strict",
+    }
+
+    api = _make_api({"repeater": {}, "mesh": {}, "radio": {}, "delays": {}})
+    api.config_manager.update_and_save.return_value = {
+        "success": True,
+        "saved": True,
+        "live_updated": True,
+    }
+
+    out = api.update_radio_config()
+
+    assert out["success"] is True
+    assert api.config["repeater"]["owner_info"] == "Alice\nOps"
+    assert api.config["mesh"]["path_hash_mode"] == 2
+    assert api.config["mesh"]["loop_detect"] == "strict"
+    assert "owner.info" in out["data"].get("applied", [])
 
 
 class _FakeIdentityObj:

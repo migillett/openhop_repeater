@@ -264,6 +264,39 @@ async def test_send_advert_branches_and_success_path():
     daemon.dispatcher.packet_filter.track_packet.assert_called_once()
 
 
+@pytest.mark.asyncio
+async def test_send_advert_applies_transport_scope_when_default_region_set():
+    from openhop_core.protocol.constants import ROUTE_TYPE_FLOOD, ROUTE_TYPE_TRANSPORT_FLOOD
+
+    daemon = RepeaterDaemon(_base_config(), radio=object())
+    daemon.dispatcher = SimpleNamespace(
+        send_packet=AsyncMock(), packet_filter=SimpleNamespace(track_packet=MagicMock())
+    )
+    daemon.local_identity = _FakeIdentity(b"\x22" + b"y" * 31)
+    daemon.repeater_handler = SimpleNamespace(mark_seen=MagicMock())
+    daemon.config["mesh"] = {"default_region": "alpha"}
+
+    packet = SimpleNamespace(
+        header=ROUTE_TYPE_FLOOD,
+        transport_codes=[0, 0],
+        get_payload_type=lambda: 3,
+        get_payload=lambda: b"minimal_advert_payload",
+        calculate_packet_hash=lambda: b"\xcd" * 16,
+    )
+
+    with (
+        patch("openhop_core.protocol.PacketBuilder.create_advert", return_value=packet),
+        patch("openhop_core.protocol.transport_keys.get_auto_key_for", return_value=b"\x01" * 16),
+        patch("openhop_core.protocol.transport_keys.calc_transport_code", return_value=0xBEEF),
+    ):
+        ok = await daemon.send_advert()
+
+    assert ok is True
+    assert packet.transport_codes == [0xBEEF, 0]
+    assert (packet.header & 0x03) == ROUTE_TYPE_TRANSPORT_FLOOD
+    daemon.dispatcher.send_packet.assert_awaited_once_with(packet, wait_for_ack=False)
+
+
 def test_update_repeater_location_from_gps_branches():
     daemon = RepeaterDaemon(_base_config(), radio=object())
 

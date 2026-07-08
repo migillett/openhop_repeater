@@ -312,6 +312,7 @@ def test_text_helper_cli_prefix_and_admin_permission_checks():
 
     assert helper._is_cli_command("get status") is True
     assert helper._is_cli_command("99|get status") is True
+    assert helper._is_cli_command("04|discover.neighbors") is True
     assert helper._is_cli_command("hello world") is False
 
     assert helper._check_admin_permission_for_identity(0x21, 0x41) is True

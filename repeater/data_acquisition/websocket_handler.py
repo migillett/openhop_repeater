@@ -57,7 +57,11 @@ class PacketWebSocket(WebSocket):
             try:
                 payload = jwt_handler.verify_jwt(token)
                 if payload:
-                    if client_id and payload.get("client_id") and payload.get("client_id") != client_id:
+                    if (
+                        client_id
+                        and payload.get("client_id")
+                        and payload.get("client_id") != client_id
+                    ):
                         logger.warning("WebSocket connection rejected: client_id mismatch")
                         self.close(code=1008, reason="unauthorized")
                         return

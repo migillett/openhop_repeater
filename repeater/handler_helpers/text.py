@@ -18,6 +18,7 @@ from .room_server import RoomServer
 
 logger = logging.getLogger("TextHelper")
 
+
 # Text message type flags
 TXT_TYPE_PLAIN = 0x00
 TXT_TYPE_CLI_DATA = 0x01
@@ -464,6 +465,7 @@ class TextHelper:
             "board",
             "neighbors",
             "neighbor.",
+            "discover.",
             "tempradio ",
             "setperm ",
             "region",

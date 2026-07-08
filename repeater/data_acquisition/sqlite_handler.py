@@ -2143,10 +2143,28 @@ class SQLiteHandler:
         try:
             with self._connect() as conn:
                 cursor = conn.execute("DELETE FROM adverts WHERE id = ?", (advert_id,))
+                self._neighbors_cache = {"timestamp": 0.0, "value": None}
                 return cursor.rowcount > 0
         except Exception as e:
             logger.error(f"Failed to delete advert: {e}")
             return False
+
+    def delete_neighbors_by_pubkey_prefix(self, pubkey_prefix: Optional[str]) -> int:
+        """Delete neighbor adverts by pubkey prefix (or all when prefix is None)."""
+        try:
+            with self._connect() as conn:
+                if pubkey_prefix is None:
+                    cursor = conn.execute("DELETE FROM adverts")
+                else:
+                    cursor = conn.execute(
+                        "DELETE FROM adverts WHERE lower(pubkey) LIKE ?",
+                        (f"{pubkey_prefix.lower()}%",),
+                    )
+                self._neighbors_cache = {"timestamp": 0.0, "value": None}
+                return int(cursor.rowcount)
+        except Exception as e:
+            logger.error(f"Failed to delete neighbors by prefix: {e}")
+            raise
 
     # ------------------------------------------------------------------
     # Room Server Methods
@@ -2755,7 +2773,9 @@ class SQLiteHandler:
             logger.error(f"Failed to count companion messages: {e}")
             return 0
 
-    def companion_load_messages(self, companion_hash: str, limit: int = 100) -> Optional[List[Dict]]:
+    def companion_load_messages(
+        self, companion_hash: str, limit: int = 100
+    ) -> Optional[List[Dict]]:
         """Load queued messages for a companion (oldest first for queue order).
 
         Returns [] when the companion has no persisted messages, or None when

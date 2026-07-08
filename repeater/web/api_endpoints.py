@@ -28,6 +28,7 @@ from repeater.companion.utils import (
 from repeater.config import resolve_storage_dir
 from repeater.policy_engine import PolicyEngine
 from repeater.service_utils import get_buildroot_image_info
+from repeater.utils_packet import create_scoped_advert_packet
 
 from .auth.middleware import require_auth
 from .auth_endpoints import AuthAPIEndpoints
@@ -341,6 +342,8 @@ class APIEndpoints:
         if not pub_key:
             return enriched
 
+        enriched["is_self"] = self._is_local_discovery_pubkey(pub_key)
+
         try:
             enriched["node_hash"] = self._fmt_hash(bytes.fromhex(pub_key))
         except ValueError:
@@ -380,6 +383,52 @@ class APIEndpoints:
         enriched["last_seen"] = neighbor_info.get("last_seen")
         enriched["advert_count"] = neighbor_info.get("advert_count")
         return enriched
+
+    def _get_local_pubkey_hex(self) -> Optional[str]:
+        """Return local node public key in hex when available."""
+        daemon = getattr(self, "daemon_instance", None)
+        identity = getattr(daemon, "local_identity", None)
+
+        try:
+            if identity and hasattr(identity, "get_public_key"):
+                pubkey = identity.get_public_key()
+                if isinstance(pubkey, (bytes, bytearray)):
+                    return bytes(pubkey).hex().lower()
+                if isinstance(pubkey, str):
+                    normalized = pubkey.strip().lower()
+                    if normalized.startswith("0x"):
+                        normalized = normalized[2:]
+                    if normalized:
+                        return normalized
+        except Exception as exc:
+            logger.debug("Unable to read local identity pubkey: %s", exc)
+
+        repeater_cfg = self.config.get("repeater", {}) if isinstance(self.config, dict) else {}
+        key = repeater_cfg.get("identity_key")
+        if isinstance(key, (bytes, bytearray)):
+            return bytes(key).hex().lower()
+        if isinstance(key, str):
+            normalized = key.strip().lower()
+            if normalized.startswith("0x"):
+                normalized = normalized[2:]
+            if normalized and all(ch in "0123456789abcdef" for ch in normalized):
+                return normalized
+
+        return None
+
+    def _is_local_discovery_pubkey(self, pub_key: str) -> bool:
+        """Return True if discovery pub_key matches the local node key (including prefix form)."""
+        candidate = str(pub_key or "").strip().lower()
+        if not candidate:
+            return False
+        if candidate.startswith("0x"):
+            candidate = candidate[2:]
+
+        local_pubkey = self._get_local_pubkey_hex()
+        if not local_pubkey:
+            return False
+
+        return local_pubkey.startswith(candidate) or candidate.startswith(local_pubkey)
 
     def _process_counter_data(self, data_points, timestamps_ms):
         rates = []
@@ -3323,6 +3372,7 @@ class APIEndpoints:
             "direct_tx_delay_factor": 0.5,  # Direct TX delay (0.0-5.0)
             "rx_delay_base": 0.0,        # RX delay base (>= 0)
             "node_name": "MyNode",       # Node name
+            "owner_info": "Owner text",   # Owner info text
             "latitude": 0.0,             # Latitude (-90 to 90)
             "longitude": 0.0,            # Longitude (-180 to 180)
             "max_flood_hops": 64,         # Max flood hops (0-64)
@@ -3433,6 +3483,11 @@ class APIEndpoints:
                     return self._error("Node name too long (max 31 bytes in UTF-8)")
                 self.config["repeater"]["node_name"] = name
                 applied.append(f"name={name}")
+
+            if "owner_info" in data:
+                owner_info = str(data["owner_info"]).replace("|", "\n")
+                self.config["repeater"]["owner_info"] = owner_info
+                applied.append("owner.info")
 
             # Update latitude
             if "latitude" in data:
@@ -3953,6 +4008,90 @@ class APIEndpoints:
     @cherrypy.expose
     @cherrypy.tools.json_out()
     @cherrypy.tools.json_in()
+    def default_region(self):
+        """
+        Get or update mesh default region configuration.
+
+        GET  /default_region
+        POST /default_region
+        Body: {"default_region": "region-name" | null}
+        """
+        if cherrypy.request.method == "GET":
+            try:
+                mesh_cfg = self.config.get("mesh", {}) if isinstance(self.config, dict) else {}
+                default_region = mesh_cfg.get("default_region")
+                value = str(default_region).strip() if default_region not in (None, "") else None
+                return self._success({"default_region": value})
+            except Exception as e:
+                logger.error(f"Error getting default region: {e}")
+                return self._error(e)
+
+        if cherrypy.request.method == "POST":
+            try:
+                data = cherrypy.request.json or {}
+                if "default_region" not in data:
+                    return self._error("Missing required field: default_region")
+
+                raw_value = data.get("default_region")
+                default_region = None
+                if raw_value is not None:
+                    text = str(raw_value).strip()
+                    if text and text != "<null>":
+                        default_region = text
+
+                if "mesh" not in self.config:
+                    self.config["mesh"] = {}
+
+                # Keep region table compatible with firmware "region default": if non-null
+                # and missing, auto-create region and ensure flood allow.
+                if default_region:
+                    storage = self._get_storage()
+                    records = storage.get_transport_keys() or []
+
+                    existing = None
+                    needle = default_region.lower()
+                    for rec in records:
+                        name = str(rec.get("name") or "").strip()
+                        display = name[1:] if name.startswith("#") else name
+                        if display.lower() == needle:
+                            existing = rec
+                            break
+
+                    if existing:
+                        key_id = existing.get("id")
+                        if key_id is not None:
+                            storage.update_transport_key(int(key_id), flood_policy="allow")
+                    else:
+                        storage.create_transport_key(
+                            default_region, "allow", None, None, time.time()
+                        )
+
+                self.config["mesh"]["default_region"] = default_region
+
+                saved = self.config_manager.save_to_file()
+                if not saved:
+                    return self._error("Failed to save configuration to file")
+
+                if hasattr(self.config_manager, "live_update_daemon"):
+                    self.config_manager.live_update_daemon(["mesh"])
+
+                return self._success(
+                    {"default_region": default_region},
+                    message=(
+                        "Default region cleared"
+                        if default_region is None
+                        else f"Default region set to {default_region}"
+                    ),
+                )
+            except Exception as e:
+                logger.error(f"Error updating default region: {e}")
+                return self._error(e)
+
+        return self._error("Method not supported")
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    @cherrypy.tools.json_in()
     def advert(self, advert_id):
         # Enable CORS for this endpoint only if configured
         self._set_cors_headers()
@@ -4296,6 +4435,19 @@ class APIEndpoints:
                 return self._error("pub_key is required")
             if not re.fullmatch(r"[0-9a-f]{16}|[0-9a-f]{64}", pub_key):
                 return self._error("pub_key must be 8-byte or 32-byte hex")
+
+            if self._is_local_discovery_pubkey(pub_key):
+                enriched = self._enrich_discovery_result(
+                    {
+                        "pub_key": pub_key,
+                        "node_name": node_name,
+                        "node_type": node_type,
+                        "rssi": rssi,
+                        "response_snr": snr,
+                    }
+                )
+                enriched["is_self"] = True
+                return self._success(enriched, message="Skipped local node: not added to neighbors")
 
             contact_type = {
                 1: "Chat Node",
@@ -5279,7 +5431,6 @@ class APIEndpoints:
     ):
         """Send advert for a room server identity"""
         try:
-            from openhop_core.protocol import PacketBuilder
             from openhop_core.protocol.constants import (
                 ADVERT_FLAG_HAS_NAME,
                 ADVERT_FLAG_IS_ROOM_SERVER,
@@ -5292,15 +5443,16 @@ class APIEndpoints:
             # Build flags - just use HAS_NAME for room servers
             flags = ADVERT_FLAG_IS_ROOM_SERVER | ADVERT_FLAG_HAS_NAME
 
-            packet = PacketBuilder.create_advert(
+            mesh_config = self.config.get("mesh", {}) if isinstance(self.config, dict) else {}
+            default_region = mesh_config.get("default_region")
+            packet, scoped_region_name = create_scoped_advert_packet(
                 local_identity=identity,
-                name=node_name,
-                lat=latitude,
-                lon=longitude,
-                feature1=0,
-                feature2=0,
+                node_name=node_name,
+                latitude=latitude,
+                longitude=longitude,
                 flags=flags,
-                route_type="flood",
+                default_region=default_region,
+                scope_label="room server advert",
             )
 
             # Send via dispatcher
@@ -5314,6 +5466,8 @@ class APIEndpoints:
             logger.info(
                 f"Sent flood advert for room server '{node_name}' at ({latitude:.6f}, {longitude:.6f})"
             )
+            if scoped_region_name:
+                logger.info("Room server advert scoped to default region '%s'", scoped_region_name)
             return True
 
         except Exception as e:

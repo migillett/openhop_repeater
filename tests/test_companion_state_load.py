@@ -30,7 +30,9 @@ class TestLoadCompanionRowsVerified:
     async def test_genuinely_empty_returns_without_retry(self):
         loader = MagicMock(return_value=[])
         counter = MagicMock(return_value=0)
-        rows, stored = await _load_companion_rows_verified(loader, counter, "channels", _HASH, _NAME)
+        rows, stored = await _load_companion_rows_verified(
+            loader, counter, "channels", _HASH, _NAME
+        )
         assert rows == []
         assert stored == 0
         assert loader.call_count == 1

@@ -35,6 +35,7 @@ from repeater.handler_helpers import (
 from repeater.identity_manager import IdentityManager
 from repeater.packet_router import PacketRouter
 from repeater.sensors import SensorManager
+from repeater.utils_packet import create_scoped_advert_packet
 from repeater.web.http_server import HTTPStatsServer, _log_buffer
 
 logger = logging.getLogger("RepeaterDaemon")
@@ -1222,7 +1223,6 @@ class RepeaterDaemon:
             return False
 
         try:
-            from openhop_core.protocol import PacketBuilder
             from openhop_core.protocol.constants import (
                 ADVERT_FLAG_HAS_NAME,
                 ADVERT_FLAG_IS_REPEATER,
@@ -1243,15 +1243,16 @@ class RepeaterDaemon:
 
             flags = ADVERT_FLAG_IS_REPEATER | ADVERT_FLAG_HAS_NAME
 
-            packet = PacketBuilder.create_advert(
+            mesh_config = self.config.get("mesh", {})
+            default_region = mesh_config.get("default_region")
+            packet, scoped_region_name = create_scoped_advert_packet(
                 local_identity=self.local_identity,
-                name=node_name,
-                lat=latitude,
-                lon=longitude,
-                feature1=0,
-                feature2=0,
+                node_name=node_name,
+                latitude=latitude,
+                longitude=longitude,
                 flags=flags,
-                route_type="flood",
+                default_region=default_region,
+                scope_label="advert",
             )
 
             # Send via dispatcher
@@ -1270,6 +1271,8 @@ class RepeaterDaemon:
                 longitude,
                 location_source,
             )
+            if scoped_region_name:
+                logger.info("Advert scoped to default region '%s'", scoped_region_name)
             return True
 
         except Exception as e:

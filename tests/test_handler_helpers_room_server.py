@@ -6,9 +6,9 @@ import pytest
 
 from repeater.handler_helpers.room_server import (
     MAX_UNSYNCED_POSTS,
-    RoomServer,
     TXT_TYPE_PLAIN,
     TXT_TYPE_SIGNED_PLAIN,
+    RoomServer,
 )
 
 
@@ -208,7 +208,9 @@ async def test_room_server_push_expected_ack_matches_firmware_signed_ack():
     assert ok is False
     assert len(sent) == 1
 
-    upserts = [c.kwargs for c in db.upsert_client_sync.call_args_list if "pending_ack_crc" in c.kwargs]
+    upserts = [
+        c.kwargs for c in db.upsert_client_sync.call_args_list if "pending_ack_crc" in c.kwargs
+    ]
     assert len(upserts) == 1
     expected_ack_crc = upserts[0]["pending_ack_crc"]
 
