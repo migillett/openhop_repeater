@@ -974,7 +974,7 @@ class MeshCoreToMqttPusher:
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "origin": origin or self.node_name,
             "origin_id": self.public_key,
-            "model": "openHopq-Repeater",
+            "model": "openHop-Repeater",
             "firmware_version": self.app_version,
             "radio": radio_config or self.radio_config,
             "client_version": f"openhop_repeater/{self.app_version}",
