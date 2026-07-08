@@ -592,6 +592,64 @@ class TestPacketRouterRoutingBranches(unittest.IsolatedAsyncioTestCase):
         bridge.process_received_packet.assert_awaited_once()
         daemon.repeater_handler.assert_not_awaited()
 
+    async def test_route_login_server_hash_collision_offers_to_both(self):
+        """A one-byte dest hash shared by a companion and a room-server identity
+        must be offered to BOTH handlers; only the one whose key decrypts replies.
+        Regression: previously the companion shadowed the room server, so the
+        room-server login never ran and failed with Invalid HMAC."""
+        daemon = _make_daemon()
+        bridge = _make_bridge()
+        daemon.companion_bridges = {0xF5: bridge}
+        daemon.login_helper = MagicMock()
+        daemon.login_helper.handlers = {0xF5: MagicMock()}
+        daemon.login_helper.process_login_packet = AsyncMock(return_value=True)
+        daemon.repeater_handler = AsyncMock()
+        daemon.repeater_handler.storage = MagicMock()
+        daemon.repeater_handler.record_packet_only = MagicMock()
+        router = PacketRouter(daemon)
+        pkt = _make_packet(LoginServerHandler.payload_type())
+        pkt.payload = bytes([0xF5, 0x99])
+        await router._route_packet(pkt)
+        bridge.process_received_packet.assert_awaited_once()
+        daemon.login_helper.process_login_packet.assert_awaited_once()
+        daemon.repeater_handler.assert_not_awaited()
+
+    async def test_route_login_server_companion_only_skips_login_helper(self):
+        """No collision: a companion-owned hash with no room server registered
+        there must not also invoke login_helper."""
+        daemon = _make_daemon()
+        bridge = _make_bridge()
+        daemon.companion_bridges = {0x7A: bridge}
+        daemon.login_helper = MagicMock()
+        daemon.login_helper.handlers = {}  # no room-server identity at this hash
+        daemon.login_helper.process_login_packet = AsyncMock(return_value=False)
+        daemon.repeater_handler = AsyncMock()
+        daemon.repeater_handler.storage = MagicMock()
+        daemon.repeater_handler.record_packet_only = MagicMock()
+        router = PacketRouter(daemon)
+        pkt = _make_packet(LoginServerHandler.payload_type())
+        pkt.payload = bytes([0x7A, 0x99])
+        await router._route_packet(pkt)
+        bridge.process_received_packet.assert_awaited_once()
+        daemon.login_helper.process_login_packet.assert_not_awaited()
+
+    async def test_route_login_server_room_server_without_companion(self):
+        """No local companion claims the hash: login_helper handles the
+        room-server (or forwards a remote) login as before."""
+        daemon = _make_daemon()
+        daemon.companion_bridges = {}
+        daemon.login_helper = MagicMock()
+        daemon.login_helper.handlers = {0xF5: MagicMock()}
+        daemon.login_helper.process_login_packet = AsyncMock(return_value=True)
+        daemon.repeater_handler = AsyncMock()
+        daemon.repeater_handler.storage = MagicMock()
+        daemon.repeater_handler.record_packet_only = MagicMock()
+        router = PacketRouter(daemon)
+        pkt = _make_packet(LoginServerHandler.payload_type())
+        pkt.payload = bytes([0xF5, 0x99])
+        await router._route_packet(pkt)
+        daemon.login_helper.process_login_packet.assert_awaited_once()
+
     async def test_route_text_to_helper_marks_processed(self):
         daemon = _make_daemon()
         daemon.text_helper = MagicMock()
@@ -604,6 +662,44 @@ class TestPacketRouterRoutingBranches(unittest.IsolatedAsyncioTestCase):
         await router._route_packet(pkt)
         daemon.text_helper.process_text_packet.assert_awaited_once()
         daemon.repeater_handler.assert_not_awaited()
+
+    async def test_route_text_hash_collision_offers_to_both(self):
+        """A dest hash shared by a companion and a room-server text identity must
+        reach both handlers so a companion never shadows a room-server message."""
+        daemon = _make_daemon()
+        bridge = _make_bridge()
+        daemon.companion_bridges = {0xF5: bridge}
+        daemon.text_helper = MagicMock()
+        daemon.text_helper.handlers = {0xF5: MagicMock()}
+        daemon.text_helper.process_text_packet = AsyncMock(return_value=True)
+        daemon.repeater_handler = AsyncMock()
+        daemon.repeater_handler.storage = MagicMock()
+        daemon.repeater_handler.record_packet_only = MagicMock()
+        router = PacketRouter(daemon)
+        pkt = _make_packet(TextMessageHandler.payload_type())
+        pkt.payload = bytes([0xF5, 0x01])
+        await router._route_packet(pkt)
+        bridge.process_received_packet.assert_awaited_once()
+        daemon.text_helper.process_text_packet.assert_awaited_once()
+        daemon.repeater_handler.assert_not_awaited()
+
+    async def test_route_text_companion_only_skips_text_helper(self):
+        """No collision: a companion-owned text hash must not also hit text_helper."""
+        daemon = _make_daemon()
+        bridge = _make_bridge()
+        daemon.companion_bridges = {0xEE: bridge}
+        daemon.text_helper = MagicMock()
+        daemon.text_helper.handlers = {}  # no room-server text identity here
+        daemon.text_helper.process_text_packet = AsyncMock(return_value=False)
+        daemon.repeater_handler = AsyncMock()
+        daemon.repeater_handler.storage = MagicMock()
+        daemon.repeater_handler.record_packet_only = MagicMock()
+        router = PacketRouter(daemon)
+        pkt = _make_packet(TextMessageHandler.payload_type())
+        pkt.payload = bytes([0xEE, 0x01])
+        await router._route_packet(pkt)
+        bridge.process_received_packet.assert_awaited_once()
+        daemon.text_helper.process_text_packet.assert_not_awaited()
 
     async def test_route_ack_delivers_to_all_bridges_and_engine(self):
         daemon = _make_daemon()
