@@ -6669,6 +6669,33 @@ class APIEndpoints:
             return ""
         try:
             self._require_post()
+
+            # Allow unauthenticated config restore only during first-run setup.
+            # Authenticated users may import config at any time.
+            request_user = getattr(cherrypy.request, "user", None)
+            if not request_user:
+                try:
+                    current_config = self.config
+                    if self._config_path:
+                        with open(self._config_path, "r", encoding="utf-8") as f:
+                            current_config = yaml.safe_load(f) or {}
+                except Exception as exc:
+                    logger.debug(
+                        f"config_import could not read persisted config {self._config_path}: {exc}"
+                    )
+                    current_config = self.config
+
+                needs_setup, _ = self._setup_status_from_config(current_config or {})
+                if not needs_setup:
+                    cherrypy.response.status = 403
+                    return {
+                        "success": False,
+                        "error": (
+                            "Unauthorized restore. First-run setup is already complete; "
+                            "authenticate to import configuration."
+                        ),
+                    }
+
             data = cherrypy.request.json
             imported_config = data.get("config")
 
@@ -6685,6 +6712,8 @@ class APIEndpoints:
                 "kiss",
                 "pymc_usb",
                 "pymc_tcp",
+                "mqtt_brokers",
+                "mqtt",
                 "identities",
                 "delays",
                 "web",
@@ -6733,6 +6762,11 @@ class APIEndpoints:
                                 existing = cur_by_name.get(entry.get("name"), {})
                                 entry["identity_key"] = existing.get("identity_key", "")
 
+                if section == "mqtt" and isinstance(value, dict):
+                    # Backward compatibility: treat legacy "mqtt" section as
+                    # current "mqtt_brokers" during restore.
+                    section = "mqtt_brokers"
+
                 if section in {
                     "radio",
                     "sx1262",
@@ -6741,6 +6775,8 @@ class APIEndpoints:
                     "pymc_usb",
                     "pymc_tcp",
                     "radio_type",
+                    "mqtt_brokers",
+                    "letsmesh",
                 }:
                     restart_required = True
 

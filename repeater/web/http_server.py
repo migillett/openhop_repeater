@@ -435,6 +435,9 @@ class HTTPStatsServer:
                 "/api/setup_wizard": {
                     "tools.require_auth.on": False,
                 },
+                "/api/config_import": {
+                    "tools.require_auth.on": False,
+                },
                 "/favicon.ico": {
                     "tools.staticfile.on": True,
                     "tools.staticfile.filename": os.path.join(html_dir, "favicon.ico"),
