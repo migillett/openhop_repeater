@@ -21,15 +21,17 @@ class CADCalibrationEngine:
 
     def get_test_ranges(self, spreading_factor: int):
         """Get CAD test ranges"""
-        # Higher values = less sensitive, lower values = more sensitive
-        # Test from LESS sensitive to MORE sensitive to find the sweet spot
+        # Semtech CAD guidance region (BW125/CR4/5 reference):
+        # SF7/8~(peak=22,min=10), SF9~(23,10), SF10~(24,10), SF11~(25,10), SF12~(28,10)
+        # Semtech AN1200.48 evaluates higher detPeak values (up to the 30s at SF12).
+        # Keep cadDetMin centered around 10, but allow broader/higher detPeak exploration.
         sf_ranges = {
-            7: (range(22, 30, 1), range(12, 20, 1)),
-            8: (range(22, 30, 1), range(12, 20, 1)),
-            9: (range(24, 32, 1), range(14, 22, 1)),
-            10: (range(26, 34, 1), range(16, 24, 1)),
-            11: (range(28, 36, 1), range(18, 26, 1)),
-            12: (range(30, 38, 1), range(20, 28, 1)),
+            7: (range(19, 30, 1), range(8, 14, 1)),
+            8: (range(19, 30, 1), range(8, 14, 1)),
+            9: (range(20, 32, 1), range(8, 14, 1)),
+            10: (range(21, 34, 1), range(8, 14, 1)),
+            11: (range(22, 36, 1), range(8, 14, 1)),
+            12: (range(24, 39, 1), range(8, 14, 1)),
         }
         return sf_ranges.get(spreading_factor, sf_ranges[8])
 
@@ -96,8 +98,8 @@ class CADCalibrationEngine:
         ideal_rate = 20.0
         rate_penalty = abs(adjusted_rate - ideal_rate) / ideal_rate
 
-        # Prefer moderate sensitivity settings (not too extreme)
-        sensitivity_penalty = (abs(det_peak - 25) + abs(det_min - 15)) / 20.0
+        # Prefer values near Semtech-centered practical defaults
+        sensitivity_penalty = (abs(det_peak - 25) + abs(det_min - 10)) / 24.0
 
         # Lower penalty = higher score
         score = max(0, 100 - (rate_penalty * 50) - (sensitivity_penalty * 20))

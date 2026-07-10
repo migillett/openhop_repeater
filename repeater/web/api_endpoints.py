@@ -3609,6 +3609,15 @@ class APIEndpoints:
             if peak is None or min_val is None:
                 return self._error("Missing peak or min_val parameters")
 
+            try:
+                peak = int(peak)
+                min_val = int(min_val)
+            except (TypeError, ValueError):
+                return self._error("peak and min_val must be integers")
+
+            if not (0 <= peak <= 255) or not (0 <= min_val <= 255):
+                return self._error("CAD thresholds must be between 0 and 255")
+
             if (
                 self.daemon_instance
                 and hasattr(self.daemon_instance, "radio")
