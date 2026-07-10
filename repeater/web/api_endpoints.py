@@ -447,6 +447,131 @@ class APIEndpoints:
         values = [v if v is not None else 0 for v in data_points]
         return [[timestamps_ms[i], values[i]] for i in range(min(len(values), len(timestamps_ms)))]
 
+    @staticmethod
+    def _pearson_correlation(left: list[float], right: list[float]) -> Optional[float]:
+        if len(left) != len(right) or len(left) < 5:
+            return None
+
+        mean_left = sum(left) / len(left)
+        mean_right = sum(right) / len(right)
+
+        numerator = 0.0
+        left_variance = 0.0
+        right_variance = 0.0
+        for i in range(len(left)):
+            dx = left[i] - mean_left
+            dy = right[i] - mean_right
+            numerator += dx * dy
+            left_variance += dx * dx
+            right_variance += dy * dy
+
+        denominator = (left_variance * right_variance) ** 0.5
+        if denominator <= 0:
+            return None
+        return numerator / denominator
+
+    @staticmethod
+    def _auto_bucket_seconds(range_seconds: int) -> int:
+        if range_seconds <= 0:
+            return 60
+        target = max(60, int(range_seconds / 120))
+        rounded = ((target + 59) // 60) * 60
+        return max(60, min(rounded, 3600))
+
+    def _build_rrd_bucket_metrics(self, rrd_data: Optional[dict], bucket_seconds: int) -> dict:
+        if not rrd_data:
+            return {}
+
+        timestamps = rrd_data.get("timestamps") or []
+        metrics = rrd_data.get("metrics") or {}
+        if not isinstance(timestamps, list) or not isinstance(metrics, dict):
+            return {}
+
+        def _counter_delta(values: list) -> list[float]:
+            output = []
+            previous = None
+            for item in values:
+                if item is None:
+                    output.append(0.0)
+                elif previous is None:
+                    output.append(0.0)
+                    previous = item
+                else:
+                    output.append(float(max(0, item - previous)))
+                    previous = item
+            return output
+
+        rx_values = _counter_delta(metrics.get("rx_count", []))
+        tx_values = _counter_delta(metrics.get("tx_count", []))
+        drop_values = _counter_delta(metrics.get("drop_count", []))
+        rssi_values = metrics.get("avg_rssi", []) or []
+        snr_values = metrics.get("avg_snr", []) or []
+
+        bucket_map: dict = {}
+
+        max_len = len(timestamps)
+        for i in range(max_len):
+            ts = int(timestamps[i])
+            bucket_ts = int(ts / bucket_seconds) * bucket_seconds
+            bucket = bucket_map.setdefault(
+                bucket_ts,
+                {
+                    "rx_count": 0.0,
+                    "tx_count": 0.0,
+                    "drop_count": 0.0,
+                    "avg_rssi_sum": 0.0,
+                    "avg_rssi_samples": 0,
+                    "avg_snr_sum": 0.0,
+                    "avg_snr_samples": 0,
+                },
+            )
+
+            if i < len(rx_values):
+                bucket["rx_count"] += float(rx_values[i] or 0.0)
+            if i < len(tx_values):
+                bucket["tx_count"] += float(tx_values[i] or 0.0)
+            if i < len(drop_values):
+                bucket["drop_count"] += float(drop_values[i] or 0.0)
+
+            if i < len(rssi_values) and rssi_values[i] is not None:
+                bucket["avg_rssi_sum"] += float(rssi_values[i])
+                bucket["avg_rssi_samples"] += 1
+
+            if i < len(snr_values) and snr_values[i] is not None:
+                bucket["avg_snr_sum"] += float(snr_values[i])
+                bucket["avg_snr_samples"] += 1
+
+        finalized: dict = {}
+        for bucket_ts, raw in bucket_map.items():
+            rx_count = float(raw["rx_count"])
+            tx_count = float(raw["tx_count"])
+            drop_count = float(raw["drop_count"])
+            tx_drop_total = tx_count + drop_count
+
+            avg_rssi = None
+            if raw["avg_rssi_samples"] > 0:
+                avg_rssi = raw["avg_rssi_sum"] / raw["avg_rssi_samples"]
+
+            avg_snr = None
+            if raw["avg_snr_samples"] > 0:
+                avg_snr = raw["avg_snr_sum"] / raw["avg_snr_samples"]
+
+            packet_loss_rate_pct = None
+            if tx_drop_total > 0:
+                packet_loss_rate_pct = (drop_count * 100.0) / tx_drop_total
+
+            finalized[bucket_ts] = {
+                "rx_count": int(round(rx_count)),
+                "tx_count": int(round(tx_count)),
+                "drop_count": int(round(drop_count)),
+                "traffic_volume": int(round(rx_count + tx_count)),
+                "packet_loss_rate_pct": packet_loss_rate_pct,
+                "avg_rssi": avg_rssi,
+                "avg_snr": avg_snr,
+            }
+
+        return finalized
+
     def _setup_status_from_config(self, config: dict) -> tuple[bool, dict]:
         """Return whether first-run setup should still be available."""
         node_name = config.get("repeater", {}).get("node_name", "")
@@ -3266,6 +3391,171 @@ class APIEndpoints:
             return self._error(f"Invalid parameter format: {e}")
         except Exception as e:
             logger.error(f"Error getting metrics graph data: {e}")
+            return self._error(e)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    def lbt_diagnostics(
+        self,
+        hours=24,
+        start_timestamp=None,
+        end_timestamp=None,
+        bucket_seconds=None,
+        severe_attempt_threshold=4,
+    ):
+        """Return aggregated LBT diagnostics aligned to RF-health buckets."""
+        try:
+            max_hours = 168
+            hours_int = max(1, min(int(hours), max_hours))
+
+            now = time.time()
+            if start_timestamp is not None or end_timestamp is not None:
+                if start_timestamp is None and end_timestamp is not None:
+                    end_ts = float(end_timestamp)
+                    start_ts = end_ts - (hours_int * 3600)
+                elif end_timestamp is None and start_timestamp is not None:
+                    start_ts = float(start_timestamp)
+                    end_ts = now
+                else:
+                    start_ts = float(start_timestamp)
+                    end_ts = float(end_timestamp)
+            else:
+                start_ts, end_ts = self._get_time_range(hours_int)
+                start_ts = float(start_ts)
+                end_ts = float(end_ts)
+
+            if end_ts < start_ts:
+                start_ts, end_ts = end_ts, start_ts
+
+            range_seconds = int(end_ts - start_ts)
+            if range_seconds <= 0:
+                return self._error("Invalid time range")
+
+            if range_seconds > max_hours * 3600:
+                return self._error(f"Time range too large. Max range is {max_hours} hours")
+
+            if bucket_seconds is None:
+                bucket_s = self._auto_bucket_seconds(range_seconds)
+            else:
+                bucket_s = max(60, min(int(bucket_seconds), 3600))
+
+            severe_threshold = max(2, min(int(severe_attempt_threshold), 16))
+
+            storage = self._get_storage()
+            lbt = storage.get_lbt_diagnostics(
+                start_timestamp=start_ts,
+                end_timestamp=end_ts,
+                bucket_seconds=bucket_s,
+                severe_attempt_threshold=severe_threshold,
+            )
+
+            rrd_data = storage.get_rrd_data(
+                start_time=int(start_ts),
+                end_time=int(end_ts),
+                resolution="average",
+            )
+            rf_by_bucket = self._build_rrd_bucket_metrics(rrd_data, bucket_s)
+
+            merged_buckets = []
+            for bucket in lbt.get("buckets", []):
+                bucket_ts = int(bucket.get("timestamp", 0))
+                rf = rf_by_bucket.get(bucket_ts, {})
+                merged_buckets.append(
+                    {
+                        **bucket,
+                        "rf": {
+                            "avg_rssi": rf.get("avg_rssi"),
+                            "avg_snr": rf.get("avg_snr"),
+                            "packet_loss_rate_pct": rf.get("packet_loss_rate_pct"),
+                            "traffic_volume": rf.get("traffic_volume", 0),
+                            "rx_count": rf.get("rx_count", 0),
+                            "tx_count": rf.get("tx_count", 0),
+                            "drop_count": rf.get("drop_count", 0),
+                        },
+                    }
+                )
+
+            merged_packet_type_buckets = []
+            for bucket in lbt.get("packet_type_buckets", []):
+                bucket_ts = int(bucket.get("timestamp", 0))
+                rf = rf_by_bucket.get(bucket_ts, {})
+                merged_packet_type_buckets.append(
+                    {
+                        **bucket,
+                        "rf": {
+                            "avg_rssi": rf.get("avg_rssi"),
+                            "avg_snr": rf.get("avg_snr"),
+                            "packet_loss_rate_pct": rf.get("packet_loss_rate_pct"),
+                            "traffic_volume": rf.get("traffic_volume", 0),
+                            "rx_count": rf.get("rx_count", 0),
+                            "tx_count": rf.get("tx_count", 0),
+                            "drop_count": rf.get("drop_count", 0),
+                        },
+                    }
+                )
+
+            def _build_correlation(metric_getter):
+                left = []
+                right = []
+                for item in merged_buckets:
+                    retry_rate = item.get("retry_rate_pct")
+                    metric_value = metric_getter(item)
+                    if retry_rate is None or metric_value is None:
+                        continue
+                    left.append(float(retry_rate))
+                    right.append(float(metric_value))
+
+                coeff = self._pearson_correlation(left, right)
+                if coeff is None:
+                    return {
+                        "coefficient": None,
+                        "sample_count": len(left),
+                        "note": "Insufficient or non-varying samples",
+                    }
+                return {
+                    "coefficient": coeff,
+                    "sample_count": len(left),
+                    "note": None,
+                }
+
+            correlations = {
+                "retry_rate_vs_avg_snr": _build_correlation(
+                    lambda item: item.get("rf", {}).get("avg_snr")
+                ),
+                "retry_rate_vs_avg_rssi": _build_correlation(
+                    lambda item: item.get("rf", {}).get("avg_rssi")
+                ),
+                "retry_rate_vs_packet_loss_rate": _build_correlation(
+                    lambda item: item.get("rf", {}).get("packet_loss_rate_pct")
+                ),
+                "retry_rate_vs_traffic_volume": _build_correlation(
+                    lambda item: item.get("rf", {}).get("traffic_volume")
+                ),
+            }
+
+            diagnostics = {
+                "start_time": int(start_ts),
+                "end_time": int(end_ts),
+                "bucket_seconds": int(bucket_s),
+                "severe_attempt_threshold": severe_threshold,
+                "summary": lbt.get("summary", {}),
+                "buckets": merged_buckets,
+                "packet_types": lbt.get("packet_types", []),
+                "packet_type_buckets": merged_packet_type_buckets,
+                "correlations": correlations,
+                "limitations": [
+                    "LBT attempts are derived from stored per-packet retry counts (lbt_attempts + 1).",
+                    "Per-attempt RSSI/SNR and channel frequency are not recorded for each LBT attempt.",
+                    "Airtime utilisation is not available in the current RRD metric set for direct alignment.",
+                ],
+            }
+
+            return self._success(diagnostics)
+
+        except ValueError as e:
+            return self._error(f"Invalid parameter format: {e}")
+        except Exception as e:
+            logger.error(f"Error getting LBT diagnostics: {e}")
             return self._error(e)
 
     @cherrypy.expose

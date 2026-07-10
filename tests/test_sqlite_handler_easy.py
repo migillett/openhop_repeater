@@ -361,6 +361,10 @@ def test_sync_transport_keys_validation_and_tree_apply(tmp_path, monkeypatch):
             ]
         )
 
+
+def test_sync_transport_keys_parent_and_tree_apply(tmp_path, monkeypatch):
+    h = _make_handler(tmp_path)
+
     with pytest.raises(ValueError, match="Parent node 'missing'"):
         h.sync_transport_keys(
             [
@@ -405,3 +409,162 @@ def test_sync_transport_keys_validation_and_tree_apply(tmp_path, monkeypatch):
     assert rows[1][2] == "deny"
     assert rows[1][3] == "GEN-KEY"
     assert rows[1][4] == rows[0][0]
+
+
+def test_get_lbt_diagnostics_aggregates_retry_distribution_and_summary(tmp_path):
+    h = _make_handler(tmp_path)
+
+    packets = [
+        {
+            "timestamp": 10.0,
+            "type": 1,
+            "route": 1,
+            "length": 8,
+            "transmitted": True,
+            "packet_hash": "lbt-1",
+            "lbt_attempts": 0,
+            "lbt_channel_busy": False,
+        },
+        {
+            "timestamp": 20.0,
+            "type": 1,
+            "route": 1,
+            "length": 8,
+            "transmitted": True,
+            "packet_hash": "lbt-2",
+            "lbt_attempts": 1,
+            "lbt_channel_busy": True,
+        },
+        {
+            "timestamp": 30.0,
+            "type": 1,
+            "route": 1,
+            "length": 8,
+            "transmitted": True,
+            "packet_hash": "lbt-3",
+            "lbt_attempts": 2,
+            "lbt_channel_busy": True,
+        },
+        {
+            "timestamp": 40.0,
+            "type": 1,
+            "route": 1,
+            "length": 8,
+            "transmitted": False,
+            "drop_reason": "TX failed",
+            "packet_hash": "lbt-4",
+            "lbt_attempts": 4,
+            "lbt_channel_busy": True,
+        },
+        {
+            # Excluded from TX-path diagnostics by filter.
+            "timestamp": 50.0,
+            "type": 1,
+            "route": 1,
+            "length": 8,
+            "transmitted": False,
+            "drop_reason": "Duplicate",
+            "packet_hash": "lbt-excluded",
+            "lbt_attempts": 0,
+            "lbt_channel_busy": False,
+        },
+        {
+            "timestamp": 70.0,
+            "type": 1,
+            "route": 1,
+            "length": 8,
+            "transmitted": True,
+            "packet_hash": "lbt-5",
+            "lbt_attempts": 0,
+            "lbt_channel_busy": False,
+        },
+    ]
+
+    for record in packets:
+        h.store_packet(record)
+
+    out = h.get_lbt_diagnostics(
+        start_timestamp=0,
+        end_timestamp=180,
+        bucket_seconds=60,
+        severe_attempt_threshold=4,
+    )
+
+    summary = out["summary"]
+    assert summary["total_transmissions"] == 5
+    assert summary["total_attempts"] == 12
+    assert summary["first_attempt_success"] == 2
+    assert summary["retry_packets"] == 3
+    assert summary["retry_rate_pct"] == pytest.approx(60.0)
+    assert summary["avg_attempts"] == pytest.approx(2.4)
+    assert summary["max_attempts"] == 5
+    assert summary["median_attempts"] == pytest.approx(2.0)
+    assert summary["p95_attempts"] == pytest.approx(5.0)
+    assert summary["attempts_1"] == 2
+    assert summary["attempts_2"] == 1
+    assert summary["attempts_3"] == 1
+    assert summary["attempts_4_plus"] == 1
+    assert summary["attempts_3_plus"] == 2
+    assert summary["failed_transmissions"] == 1
+    assert summary["busy_channel_events"] == 3
+    assert summary["severe_contention_count"] == 1
+    assert summary["has_lbt_data"] is True
+    assert summary["worst_bucket"] is not None
+    assert summary["worst_bucket"]["timestamp"] == 0
+
+    buckets = {int(b["timestamp"]): b for b in out["buckets"]}
+    first = buckets[0]
+    assert first["transmissions"] == 4
+    assert first["retry_packets"] == 3
+    assert first["retry_rate_pct"] == pytest.approx(75.0)
+    assert first["first_attempt_success_rate_pct"] == pytest.approx(25.0)
+    assert first["attempts_4_plus"] == 1
+    assert first["severe_contention_count"] == 1
+    assert first["failed_transmissions"] == 1
+
+    second = buckets[60]
+    assert second["transmissions"] == 1
+    assert second["retry_packets"] == 0
+    assert second["retry_rate_pct"] == pytest.approx(0.0)
+    assert second["avg_attempts"] == pytest.approx(1.0)
+
+    packet_types = out["packet_types"]
+    assert len(packet_types) == 1
+    assert packet_types[0]["packet_type"] == 1
+    assert packet_types[0]["transmissions"] == 5
+    assert packet_types[0]["retry_packets"] == 3
+
+    packet_type_buckets = out["packet_type_buckets"]
+    assert len(packet_type_buckets) == 2
+    first_type_bucket = packet_type_buckets[0]
+    assert first_type_bucket["packet_type"] == 1
+    assert first_type_bucket["timestamp"] == 0
+    assert first_type_bucket["retry_rate_pct"] == pytest.approx(75.0)
+    assert first_type_bucket["attempts_3_plus_pct"] == pytest.approx(50.0)
+
+
+def test_get_lbt_diagnostics_empty_range_preserves_no_data_distinction(tmp_path):
+    h = _make_handler(tmp_path)
+
+    out = h.get_lbt_diagnostics(
+        start_timestamp=0,
+        end_timestamp=180,
+        bucket_seconds=60,
+        severe_attempt_threshold=4,
+    )
+
+    summary = out["summary"]
+    assert summary["total_transmissions"] == 0
+    assert summary["retry_rate_pct"] is None
+    assert summary["first_attempt_success_rate_pct"] is None
+    assert summary["avg_attempts"] is None
+    assert summary["has_lbt_data"] is False
+
+    assert len(out["buckets"]) >= 3
+    for bucket in out["buckets"]:
+        assert bucket["transmissions"] == 0
+        assert bucket["retry_rate_pct"] is None
+        assert bucket["first_attempt_success_rate_pct"] is None
+        assert bucket["avg_attempts"] is None
+    assert out["packet_types"] == []
+    assert out["packet_type_buckets"] == []

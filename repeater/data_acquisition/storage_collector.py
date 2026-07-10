@@ -380,6 +380,20 @@ class StorageCollector:
             bucket_seconds=bucket_seconds,
         )
 
+    def get_lbt_diagnostics(
+        self,
+        start_timestamp: float,
+        end_timestamp: float,
+        bucket_seconds: int = 300,
+        severe_attempt_threshold: int = 4,
+    ) -> dict:
+        return self.sqlite_handler.get_lbt_diagnostics(
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+            bucket_seconds=bucket_seconds,
+            severe_attempt_threshold=severe_attempt_threshold,
+        )
+
     def get_packet_stats(self, hours: int = 24) -> dict:
         return self.sqlite_handler.get_packet_stats(hours)
 

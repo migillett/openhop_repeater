@@ -1743,6 +1743,178 @@ def test_metrics_graph_data_includes_policy_events(cherrypy_ctx):
     assert series_by_type["policy_events"]["data"] == [[100000, 1], [160000, 3], [220000, 2]]
 
 
+def test_lbt_diagnostics_aligns_with_rrd_and_returns_correlations(cherrypy_ctx):
+    del cherrypy_ctx
+    api = _make_api()
+
+    storage = SimpleNamespace(
+        get_lbt_diagnostics=MagicMock(
+            return_value={
+                "start_time": 60,
+                "end_time": 240,
+                "bucket_seconds": 60,
+                "summary": {
+                    "total_transmissions": 10,
+                    "total_attempts": 14,
+                    "first_attempt_success": 7,
+                    "retry_packets": 3,
+                    "retry_rate_pct": 30.0,
+                    "first_attempt_success_rate_pct": 70.0,
+                    "avg_attempts": 1.4,
+                    "median_attempts": 1.0,
+                    "p95_attempts": 3.0,
+                    "max_attempts": 4,
+                    "attempts_1": 7,
+                    "attempts_2": 2,
+                    "attempts_3": 1,
+                    "attempts_4_plus": 0,
+                    "attempts_3_plus": 1,
+                    "attempts_3_plus_pct": 10.0,
+                    "attempts_4_plus_pct": 0.0,
+                    "failed_transmissions": 0,
+                    "busy_channel_events": 3,
+                    "severe_contention_count": 0,
+                    "severe_contention_pct": 0.0,
+                    "severe_attempt_threshold": 4,
+                    "has_lbt_data": True,
+                    "worst_bucket": {
+                        "timestamp": 120,
+                        "retry_rate_pct": 50.0,
+                        "attempts_3_plus_pct": 20.0,
+                        "max_attempts": 3,
+                        "transmissions": 5,
+                    },
+                },
+                "buckets": [
+                    {
+                        "timestamp": 60,
+                        "transmissions": 3,
+                        "total_attempts": 3,
+                        "first_attempt_success": 3,
+                        "retry_packets": 0,
+                        "retry_rate_pct": 0.0,
+                        "first_attempt_success_rate_pct": 100.0,
+                        "avg_attempts": 1.0,
+                        "median_attempts": 1.0,
+                        "p95_attempts": 1.0,
+                        "max_attempts": 1,
+                        "attempts_1": 3,
+                        "attempts_2": 0,
+                        "attempts_3": 0,
+                        "attempts_4_plus": 0,
+                        "attempts_3_plus": 0,
+                        "attempts_3_plus_pct": 0.0,
+                        "attempts_4_plus_pct": 0.0,
+                        "failed_transmissions": 0,
+                        "busy_channel_events": 0,
+                        "severe_contention_count": 0,
+                        "severe_contention_pct": 0.0,
+                    },
+                    {
+                        "timestamp": 120,
+                        "transmissions": 5,
+                        "total_attempts": 8,
+                        "first_attempt_success": 2,
+                        "retry_packets": 3,
+                        "retry_rate_pct": 60.0,
+                        "first_attempt_success_rate_pct": 40.0,
+                        "avg_attempts": 1.6,
+                        "median_attempts": 2.0,
+                        "p95_attempts": 3.0,
+                        "max_attempts": 3,
+                        "attempts_1": 2,
+                        "attempts_2": 2,
+                        "attempts_3": 1,
+                        "attempts_4_plus": 0,
+                        "attempts_3_plus": 1,
+                        "attempts_3_plus_pct": 20.0,
+                        "attempts_4_plus_pct": 0.0,
+                        "failed_transmissions": 0,
+                        "busy_channel_events": 3,
+                        "severe_contention_count": 0,
+                        "severe_contention_pct": 0.0,
+                    },
+                ],
+                "packet_types": [
+                    {
+                        "packet_type": 1,
+                        "packet_type_label": "Response (RESPONSE)",
+                        "transmissions": 8,
+                        "retry_packets": 3,
+                        "retry_rate_pct": 37.5,
+                    }
+                ],
+                "packet_type_buckets": [
+                    {
+                        "timestamp": 120,
+                        "packet_type": 1,
+                        "packet_type_label": "Response (RESPONSE)",
+                        "transmissions": 5,
+                        "total_attempts": 8,
+                        "first_attempt_success": 2,
+                        "retry_packets": 3,
+                        "retry_rate_pct": 60.0,
+                        "first_attempt_success_rate_pct": 40.0,
+                        "avg_attempts": 1.6,
+                        "attempts_1": 2,
+                        "attempts_2": 2,
+                        "attempts_3": 1,
+                        "attempts_4_plus": 0,
+                        "attempts_3_plus": 1,
+                        "attempts_3_plus_pct": 20.0,
+                        "max_attempts": 3,
+                        "failed_transmissions": 0,
+                        "severe_contention_count": 0,
+                    }
+                ],
+            }
+        ),
+        get_rrd_data=MagicMock(
+            return_value={
+                "timestamps": [100, 160, 220],
+                "metrics": {
+                    "rx_count": [100, 110, 125],
+                    "tx_count": [50, 55, 70],
+                    "drop_count": [10, 11, 14],
+                    "avg_rssi": [-80.0, -90.0, -95.0],
+                    "avg_snr": [8.0, 2.0, -1.0],
+                },
+            }
+        ),
+    )
+    _attach_storage(api, storage)
+
+    out = api.lbt_diagnostics(hours="24", bucket_seconds="60", severe_attempt_threshold="4")
+    assert out["success"] is True
+    assert out["data"]["bucket_seconds"] == 60
+    assert out["data"]["severe_attempt_threshold"] == 4
+
+    buckets = out["data"]["buckets"]
+    assert len(buckets) == 2
+    assert "rf" in buckets[0]
+    assert buckets[0]["rf"]["traffic_volume"] >= 0
+    assert buckets[0]["rf"]["avg_snr"] is not None
+
+    correlations = out["data"]["correlations"]
+    assert "retry_rate_vs_avg_snr" in correlations
+    assert "retry_rate_vs_traffic_volume" in correlations
+    assert "sample_count" in correlations["retry_rate_vs_avg_snr"]
+
+    assert out["data"]["packet_types"][0]["packet_type"] == 1
+    assert out["data"]["packet_type_buckets"][0]["packet_type_label"] == "Response (RESPONSE)"
+    assert "rf" in out["data"]["packet_type_buckets"][0]
+
+
+def test_lbt_diagnostics_rejects_unbounded_large_time_range(cherrypy_ctx):
+    del cherrypy_ctx
+    api = _make_api()
+    _attach_storage(api, SimpleNamespace())
+
+    out = api.lbt_diagnostics(start_timestamp="0", end_timestamp=str(200 * 3600))
+    assert out["success"] is False
+    assert "Max range" in out["error"]
+
+
 def test_advert_contact_and_rate_limit_stats_endpoints(cherrypy_ctx):
     del cherrypy_ctx
     api = _make_api()

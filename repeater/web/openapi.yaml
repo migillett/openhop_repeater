@@ -1132,6 +1132,66 @@ paths:
                               items:
                                 type: number
 
+  /lbt_diagnostics:
+    get:
+      tags: [Charts]
+      summary: Get LBT diagnostics aligned with RF metrics
+      description: |
+        Returns aggregated Listen Before Talk (LBT) diagnostics for transmission-path
+        packets, aligned to RF health buckets for correlation analysis.
+
+        Notes:
+        - LBT total attempts are derived as `lbt_attempts + 1` from stored packet metadata.
+        - Buckets are bounded and aggregated server-side for efficient dashboard refresh.
+      parameters:
+        - name: hours
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 168
+            default: 24
+          description: Fallback range in hours when explicit timestamps are not provided.
+        - name: start_timestamp
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Inclusive start timestamp (Unix epoch seconds).
+        - name: end_timestamp
+          in: query
+          schema:
+            type: number
+            format: float
+          description: Inclusive end timestamp (Unix epoch seconds).
+        - name: bucket_seconds
+          in: query
+          schema:
+            type: integer
+            minimum: 60
+            maximum: 3600
+          description: Bucket width in seconds. If omitted, server auto-selects based on range.
+        - name: severe_attempt_threshold
+          in: query
+          schema:
+            type: integer
+            minimum: 2
+            maximum: 16
+            default: 4
+          description: Attempt threshold used to classify severe contention events.
+      responses:
+        '200':
+          description: LBT diagnostics response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/LbtDiagnosticsResponse'
+
   /noise_floor_history:
     get:
       tags: [Noise Floor]
@@ -4157,6 +4217,381 @@ components:
         error:
           type: string
           description: Error message
+
+    LbtDiagnosticsResponse:
+      type: object
+      required: [start_time, end_time, bucket_seconds, severe_attempt_threshold, summary, buckets, packet_types, packet_type_buckets, correlations, limitations]
+      properties:
+        start_time:
+          type: integer
+          description: Selected range start timestamp (Unix epoch seconds)
+        end_time:
+          type: integer
+          description: Selected range end timestamp (Unix epoch seconds)
+        bucket_seconds:
+          type: integer
+          minimum: 60
+          maximum: 3600
+          description: Aggregation interval in seconds
+        severe_attempt_threshold:
+          type: integer
+          minimum: 2
+          maximum: 16
+          description: Attempt count threshold used for severe contention classification
+        summary:
+          $ref: '#/components/schemas/LbtSummary'
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/LbtBucket'
+        packet_types:
+          type: array
+          description: Packet types present in the selected range, sorted by transmission volume.
+          items:
+            $ref: '#/components/schemas/LbtPacketTypeSummary'
+        packet_type_buckets:
+          type: array
+          description: Sparse per-packet-type bucket diagnostics (only combinations with transmissions).
+          items:
+            $ref: '#/components/schemas/LbtPacketTypeBucket'
+        correlations:
+          $ref: '#/components/schemas/LbtCorrelationSet'
+        limitations:
+          type: array
+          items:
+            type: string
+
+    LbtPacketTypeSummary:
+      type: object
+      required: [packet_type, packet_type_label, transmissions, retry_packets]
+      properties:
+        packet_type:
+          type: integer
+          description: Raw packet type code from packet records.
+        packet_type_label:
+          type: string
+          description: Human-readable packet type label.
+        transmissions:
+          type: integer
+          minimum: 0
+        retry_packets:
+          type: integer
+          minimum: 0
+        retry_rate_pct:
+          type: number
+          format: float
+          nullable: true
+
+    LbtPacketTypeBucket:
+      type: object
+      required: [timestamp, packet_type, packet_type_label, transmissions, total_attempts, first_attempt_success, retry_packets, attempts_1, attempts_2, attempts_3, attempts_4_plus, attempts_3_plus, max_attempts, failed_transmissions, severe_contention_count, rf]
+      properties:
+        timestamp:
+          type: integer
+          description: Bucket timestamp (Unix epoch seconds)
+        packet_type:
+          type: integer
+          description: Raw packet type code from packet records.
+        packet_type_label:
+          type: string
+          description: Human-readable packet type label.
+        transmissions:
+          type: integer
+          minimum: 0
+        total_attempts:
+          type: integer
+          minimum: 0
+        first_attempt_success:
+          type: integer
+          minimum: 0
+        retry_packets:
+          type: integer
+          minimum: 0
+        retry_rate_pct:
+          type: number
+          format: float
+          nullable: true
+        first_attempt_success_rate_pct:
+          type: number
+          format: float
+          nullable: true
+        avg_attempts:
+          type: number
+          format: float
+          nullable: true
+        attempts_1:
+          type: integer
+          minimum: 0
+        attempts_2:
+          type: integer
+          minimum: 0
+        attempts_3:
+          type: integer
+          minimum: 0
+        attempts_4_plus:
+          type: integer
+          minimum: 0
+        attempts_3_plus:
+          type: integer
+          minimum: 0
+        attempts_3_plus_pct:
+          type: number
+          format: float
+          nullable: true
+        max_attempts:
+          type: integer
+          minimum: 0
+        failed_transmissions:
+          type: integer
+          minimum: 0
+        severe_contention_count:
+          type: integer
+          minimum: 0
+        rf:
+          $ref: '#/components/schemas/LbtRfBucket'
+
+    LbtSummary:
+      type: object
+      required: [total_transmissions, total_attempts, first_attempt_success, retry_packets, max_attempts, attempts_1, attempts_2, attempts_3, attempts_4_plus, attempts_3_plus, failed_transmissions, busy_channel_events, severe_contention_count, severe_attempt_threshold, has_lbt_data]
+      properties:
+        total_transmissions:
+          type: integer
+          minimum: 0
+        total_attempts:
+          type: integer
+          minimum: 0
+        first_attempt_success:
+          type: integer
+          minimum: 0
+        retry_packets:
+          type: integer
+          minimum: 0
+        retry_rate_pct:
+          type: number
+          format: float
+          nullable: true
+        first_attempt_success_rate_pct:
+          type: number
+          format: float
+          nullable: true
+        avg_attempts:
+          type: number
+          format: float
+          nullable: true
+        median_attempts:
+          type: number
+          format: float
+          nullable: true
+        p95_attempts:
+          type: number
+          format: float
+          nullable: true
+        max_attempts:
+          type: integer
+          minimum: 0
+        attempts_1:
+          type: integer
+          minimum: 0
+        attempts_2:
+          type: integer
+          minimum: 0
+        attempts_3:
+          type: integer
+          minimum: 0
+        attempts_4_plus:
+          type: integer
+          minimum: 0
+        attempts_3_plus:
+          type: integer
+          minimum: 0
+        attempts_3_plus_pct:
+          type: number
+          format: float
+          nullable: true
+        attempts_4_plus_pct:
+          type: number
+          format: float
+          nullable: true
+        failed_transmissions:
+          type: integer
+          minimum: 0
+        busy_channel_events:
+          type: integer
+          minimum: 0
+        severe_contention_count:
+          type: integer
+          minimum: 0
+        severe_contention_pct:
+          type: number
+          format: float
+          nullable: true
+        severe_attempt_threshold:
+          type: integer
+          minimum: 2
+          maximum: 16
+        has_lbt_data:
+          type: boolean
+        worst_bucket:
+          $ref: '#/components/schemas/LbtWorstBucket'
+          nullable: true
+
+    LbtWorstBucket:
+      type: object
+      required: [timestamp, retry_rate_pct, attempts_3_plus_pct, max_attempts, transmissions]
+      properties:
+        timestamp:
+          type: integer
+        retry_rate_pct:
+          type: number
+          format: float
+        attempts_3_plus_pct:
+          type: number
+          format: float
+        max_attempts:
+          type: integer
+          minimum: 0
+        transmissions:
+          type: integer
+          minimum: 0
+
+    LbtBucket:
+      type: object
+      required: [timestamp, transmissions, total_attempts, first_attempt_success, retry_packets, max_attempts, attempts_1, attempts_2, attempts_3, attempts_4_plus, attempts_3_plus, failed_transmissions, busy_channel_events, severe_contention_count, rf]
+      properties:
+        timestamp:
+          type: integer
+          description: Bucket timestamp (Unix epoch seconds)
+        transmissions:
+          type: integer
+          minimum: 0
+        total_attempts:
+          type: integer
+          minimum: 0
+        first_attempt_success:
+          type: integer
+          minimum: 0
+        retry_packets:
+          type: integer
+          minimum: 0
+        retry_rate_pct:
+          type: number
+          format: float
+          nullable: true
+        first_attempt_success_rate_pct:
+          type: number
+          format: float
+          nullable: true
+        avg_attempts:
+          type: number
+          format: float
+          nullable: true
+        median_attempts:
+          type: number
+          format: float
+          nullable: true
+        p95_attempts:
+          type: number
+          format: float
+          nullable: true
+        max_attempts:
+          type: integer
+          minimum: 0
+        attempts_1:
+          type: integer
+          minimum: 0
+        attempts_2:
+          type: integer
+          minimum: 0
+        attempts_3:
+          type: integer
+          minimum: 0
+        attempts_4_plus:
+          type: integer
+          minimum: 0
+        attempts_3_plus:
+          type: integer
+          minimum: 0
+        attempts_3_plus_pct:
+          type: number
+          format: float
+          nullable: true
+        attempts_4_plus_pct:
+          type: number
+          format: float
+          nullable: true
+        failed_transmissions:
+          type: integer
+          minimum: 0
+        busy_channel_events:
+          type: integer
+          minimum: 0
+        severe_contention_count:
+          type: integer
+          minimum: 0
+        severe_contention_pct:
+          type: number
+          format: float
+          nullable: true
+        rf:
+          $ref: '#/components/schemas/LbtRfBucket'
+
+    LbtRfBucket:
+      type: object
+      required: [traffic_volume, rx_count, tx_count, drop_count]
+      properties:
+        avg_rssi:
+          type: number
+          format: float
+          nullable: true
+        avg_snr:
+          type: number
+          format: float
+          nullable: true
+        packet_loss_rate_pct:
+          type: number
+          format: float
+          nullable: true
+        traffic_volume:
+          type: integer
+          minimum: 0
+        rx_count:
+          type: integer
+          minimum: 0
+        tx_count:
+          type: integer
+          minimum: 0
+        drop_count:
+          type: integer
+          minimum: 0
+
+    LbtCorrelationSet:
+      type: object
+      required: [retry_rate_vs_avg_snr, retry_rate_vs_avg_rssi, retry_rate_vs_packet_loss_rate, retry_rate_vs_traffic_volume]
+      properties:
+        retry_rate_vs_avg_snr:
+          $ref: '#/components/schemas/LbtCorrelationValue'
+        retry_rate_vs_avg_rssi:
+          $ref: '#/components/schemas/LbtCorrelationValue'
+        retry_rate_vs_packet_loss_rate:
+          $ref: '#/components/schemas/LbtCorrelationValue'
+        retry_rate_vs_traffic_volume:
+          $ref: '#/components/schemas/LbtCorrelationValue'
+
+    LbtCorrelationValue:
+      type: object
+      required: [coefficient, sample_count]
+      properties:
+        coefficient:
+          type: number
+          format: float
+          nullable: true
+          description: Pearson coefficient in range [-1, 1] when enough samples exist
+        sample_count:
+          type: integer
+          minimum: 0
+        note:
+          type: string
+          nullable: true
 
     RoomMessage:
       type: object

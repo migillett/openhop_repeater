@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import math
 import secrets
 import sqlite3
 import threading
@@ -943,6 +944,524 @@ class SQLiteHandler:
         except Exception as e:
             logger.error(f"Failed to get policy event counts: {e}")
             return []
+
+    def get_lbt_diagnostics(
+        self,
+        start_timestamp: float,
+        end_timestamp: float,
+        bucket_seconds: int = 300,
+        severe_attempt_threshold: int = 4,
+    ) -> dict:
+        """Return aggregated LBT diagnostics for TX-path packets.
+
+        LBT metadata in packets is persisted as "extra attempts/backoffs" where:
+          - lbt_attempts == 0 means first CAD/LBT check was clear
+          - total attempts/checks ~= lbt_attempts + 1
+
+        This method avoids returning raw packet rows and instead returns
+        bucketed aggregates + summary metrics for efficient dashboard refreshes.
+        """
+
+        def _weighted_percentile(attempt_counts: dict, q: float) -> Optional[float]:
+            total = sum(int(v) for v in attempt_counts.values())
+            if total <= 0:
+                return None
+
+            q = max(0.0, min(1.0, float(q)))
+            # Use nearest-rank percentile so p95 on sparse samples doesn't
+            # systematically under-report tail attempts.
+            rank = max(1, int(math.ceil(total * q)))
+            running = 0
+            for attempt in sorted(int(k) for k in attempt_counts.keys()):
+                running += int(attempt_counts.get(attempt, 0))
+                if running >= rank:
+                    return float(attempt)
+            return float(max(int(k) for k in attempt_counts.keys()))
+
+        def _packet_type_name(pkt_type: int) -> str:
+            try:
+                from openhop_core.protocol.utils import PAYLOAD_TYPES as _PT
+
+                labels = {
+                    "REQ": "Request",
+                    "RESPONSE": "Response",
+                    "TXT_MSG": "Plain Text Message",
+                    "ACK": "Acknowledgment",
+                    "ADVERT": "Node Advertisement",
+                    "GRP_TXT": "Group Text Message",
+                    "GRP_DATA": "Group Datagram",
+                    "ANON_REQ": "Anonymous Request",
+                    "PATH": "Returned Path",
+                    "TRACE": "Trace",
+                    "MULTIPART": "Multi-part Packet",
+                    "CONTROL": "Control",
+                    "RAW_CUSTOM": "Custom Packet",
+                }
+                code = _PT.get(pkt_type)
+                if not code:
+                    return (
+                        f"Reserved Type {pkt_type}" if 0 <= pkt_type <= 15 else f"Type {pkt_type}"
+                    )
+                return f"{labels.get(code, code.replace('_', ' ').title())} ({code})"
+            except Exception:
+                return f"Reserved Type {pkt_type}" if 0 <= pkt_type <= 15 else f"Type {pkt_type}"
+
+        try:
+            bucket_seconds = max(60, min(int(bucket_seconds), 3600))
+            severe_attempt_threshold = max(2, int(severe_attempt_threshold))
+
+            if end_timestamp < start_timestamp:
+                start_timestamp, end_timestamp = end_timestamp, start_timestamp
+
+            tx_filter = "(transmitted = 1 OR lbt_attempts > 0 OR drop_reason LIKE 'TX failed%')"
+
+            with self._connect() as conn:
+                conn.row_factory = sqlite3.Row
+
+                aggregate_rows = conn.execute(
+                    f"""
+                    WITH tx_packets AS (
+                        SELECT
+                            CAST(timestamp / ? AS INTEGER) * ? AS bucket_ts,
+                            CASE
+                                WHEN lbt_attempts IS NULL OR lbt_attempts < 0 THEN 1
+                                ELSE lbt_attempts + 1
+                            END AS attempts_total,
+                            CASE WHEN transmitted = 1 THEN 1 ELSE 0 END AS tx_success,
+                            CASE
+                                WHEN transmitted = 0 AND drop_reason LIKE 'TX failed%' THEN 1
+                                ELSE 0
+                            END AS failed_tx,
+                            CASE WHEN COALESCE(lbt_channel_busy, 0) = 1 THEN 1 ELSE 0 END AS busy
+                        FROM packets INDEXED BY idx_packets_timestamp
+                        WHERE timestamp >= ?
+                          AND timestamp <= ?
+                          AND {tx_filter}
+                    )
+                    SELECT
+                        bucket_ts,
+                        COUNT(*) AS transmissions,
+                        SUM(attempts_total) AS total_attempts,
+                        SUM(CASE WHEN attempts_total = 1 THEN 1 ELSE 0 END) AS attempts_1,
+                        SUM(CASE WHEN attempts_total = 2 THEN 1 ELSE 0 END) AS attempts_2,
+                        SUM(CASE WHEN attempts_total = 3 THEN 1 ELSE 0 END) AS attempts_3,
+                        SUM(CASE WHEN attempts_total >= 4 THEN 1 ELSE 0 END) AS attempts_4_plus,
+                        SUM(CASE WHEN attempts_total > 1 THEN 1 ELSE 0 END) AS retry_packets,
+                        SUM(CASE WHEN tx_success = 1 AND attempts_total = 1 THEN 1 ELSE 0 END) AS first_attempt_success,
+                        SUM(failed_tx) AS failed_transmissions,
+                        SUM(busy) AS busy_channel_events,
+                        SUM(CASE WHEN attempts_total >= ? THEN 1 ELSE 0 END) AS severe_contention_count,
+                        MAX(attempts_total) AS max_attempts
+                    FROM tx_packets
+                    GROUP BY bucket_ts
+                    ORDER BY bucket_ts ASC
+                    """,
+                    (
+                        bucket_seconds,
+                        bucket_seconds,
+                        float(start_timestamp),
+                        float(end_timestamp),
+                        severe_attempt_threshold,
+                    ),
+                ).fetchall()
+
+                dist_rows = conn.execute(
+                    f"""
+                    WITH tx_packets AS (
+                        SELECT
+                            CAST(timestamp / ? AS INTEGER) * ? AS bucket_ts,
+                            CASE
+                                WHEN lbt_attempts IS NULL OR lbt_attempts < 0 THEN 1
+                                ELSE lbt_attempts + 1
+                            END AS attempts_total
+                        FROM packets INDEXED BY idx_packets_timestamp
+                        WHERE timestamp >= ?
+                          AND timestamp <= ?
+                          AND {tx_filter}
+                    )
+                    SELECT bucket_ts, attempts_total, COUNT(*) AS cnt
+                    FROM tx_packets
+                    GROUP BY bucket_ts, attempts_total
+                    ORDER BY bucket_ts ASC, attempts_total ASC
+                    """,
+                    (
+                        bucket_seconds,
+                        bucket_seconds,
+                        float(start_timestamp),
+                        float(end_timestamp),
+                    ),
+                ).fetchall()
+
+                type_rows = conn.execute(
+                    f"""
+                    WITH tx_packets AS (
+                        SELECT
+                            CAST(timestamp / ? AS INTEGER) * ? AS bucket_ts,
+                            type AS packet_type,
+                            CASE
+                                WHEN lbt_attempts IS NULL OR lbt_attempts < 0 THEN 1
+                                ELSE lbt_attempts + 1
+                            END AS attempts_total,
+                            CASE WHEN transmitted = 1 THEN 1 ELSE 0 END AS tx_success,
+                            CASE
+                                WHEN transmitted = 0 AND drop_reason LIKE 'TX failed%' THEN 1
+                                ELSE 0
+                            END AS failed_tx
+                        FROM packets INDEXED BY idx_packets_timestamp
+                        WHERE timestamp >= ?
+                          AND timestamp <= ?
+                          AND {tx_filter}
+                    )
+                    SELECT
+                        bucket_ts,
+                        packet_type,
+                        COUNT(*) AS transmissions,
+                        SUM(attempts_total) AS total_attempts,
+                        SUM(CASE WHEN attempts_total = 1 THEN 1 ELSE 0 END) AS attempts_1,
+                        SUM(CASE WHEN attempts_total = 2 THEN 1 ELSE 0 END) AS attempts_2,
+                        SUM(CASE WHEN attempts_total = 3 THEN 1 ELSE 0 END) AS attempts_3,
+                        SUM(CASE WHEN attempts_total >= 4 THEN 1 ELSE 0 END) AS attempts_4_plus,
+                        SUM(CASE WHEN attempts_total > 1 THEN 1 ELSE 0 END) AS retry_packets,
+                        SUM(CASE WHEN tx_success = 1 AND attempts_total = 1 THEN 1 ELSE 0 END) AS first_attempt_success,
+                        SUM(failed_tx) AS failed_transmissions,
+                        SUM(CASE WHEN attempts_total >= ? THEN 1 ELSE 0 END) AS severe_contention_count,
+                        MAX(attempts_total) AS max_attempts
+                    FROM tx_packets
+                    GROUP BY bucket_ts, packet_type
+                    ORDER BY bucket_ts ASC, packet_type ASC
+                    """,
+                    (
+                        bucket_seconds,
+                        bucket_seconds,
+                        float(start_timestamp),
+                        float(end_timestamp),
+                        severe_attempt_threshold,
+                    ),
+                ).fetchall()
+
+            dist_by_bucket: dict = {}
+            overall_dist: dict = {}
+            for row in dist_rows:
+                bucket_ts = int(row["bucket_ts"])
+                attempt = int(row["attempts_total"])
+                count = int(row["cnt"])
+                bucket_dist = dist_by_bucket.setdefault(bucket_ts, {})
+                bucket_dist[attempt] = bucket_dist.get(attempt, 0) + count
+                overall_dist[attempt] = overall_dist.get(attempt, 0) + count
+
+            bucket_map: dict = {}
+            start_bucket = int(float(start_timestamp) // bucket_seconds) * bucket_seconds
+            end_bucket = int(float(end_timestamp) // bucket_seconds) * bucket_seconds
+            for bucket_ts in range(start_bucket, end_bucket + 1, bucket_seconds):
+                bucket_map[bucket_ts] = {
+                    "timestamp": bucket_ts,
+                    "transmissions": 0,
+                    "total_attempts": 0,
+                    "attempts_1": 0,
+                    "attempts_2": 0,
+                    "attempts_3": 0,
+                    "attempts_4_plus": 0,
+                    "retry_packets": 0,
+                    "first_attempt_success": 0,
+                    "failed_transmissions": 0,
+                    "busy_channel_events": 0,
+                    "severe_contention_count": 0,
+                    "max_attempts": 0,
+                }
+
+            for row in aggregate_rows:
+                bucket_ts = int(row["bucket_ts"])
+                if bucket_ts not in bucket_map:
+                    bucket_map[bucket_ts] = {
+                        "timestamp": bucket_ts,
+                        "transmissions": 0,
+                        "total_attempts": 0,
+                        "attempts_1": 0,
+                        "attempts_2": 0,
+                        "attempts_3": 0,
+                        "attempts_4_plus": 0,
+                        "retry_packets": 0,
+                        "first_attempt_success": 0,
+                        "failed_transmissions": 0,
+                        "busy_channel_events": 0,
+                        "severe_contention_count": 0,
+                        "max_attempts": 0,
+                    }
+                bucket_map[bucket_ts].update(
+                    {
+                        "transmissions": int(row["transmissions"] or 0),
+                        "total_attempts": int(row["total_attempts"] or 0),
+                        "attempts_1": int(row["attempts_1"] or 0),
+                        "attempts_2": int(row["attempts_2"] or 0),
+                        "attempts_3": int(row["attempts_3"] or 0),
+                        "attempts_4_plus": int(row["attempts_4_plus"] or 0),
+                        "retry_packets": int(row["retry_packets"] or 0),
+                        "first_attempt_success": int(row["first_attempt_success"] or 0),
+                        "failed_transmissions": int(row["failed_transmissions"] or 0),
+                        "busy_channel_events": int(row["busy_channel_events"] or 0),
+                        "severe_contention_count": int(row["severe_contention_count"] or 0),
+                        "max_attempts": int(row["max_attempts"] or 0),
+                    }
+                )
+
+            buckets = []
+            for bucket_ts in sorted(bucket_map.keys()):
+                bucket = bucket_map[bucket_ts]
+                transmissions = int(bucket["transmissions"])
+                total_attempts = int(bucket["total_attempts"])
+                attempts_3_plus = int(bucket["attempts_3"] + bucket["attempts_4_plus"])
+
+                median_attempts = _weighted_percentile(dist_by_bucket.get(bucket_ts, {}), 0.5)
+                p95_attempts = _weighted_percentile(dist_by_bucket.get(bucket_ts, {}), 0.95)
+
+                retry_rate_pct = None
+                first_attempt_success_rate_pct = None
+                avg_attempts = None
+                attempts_3_plus_pct = None
+                attempts_4_plus_pct = None
+                severe_contention_pct = None
+
+                if transmissions > 0:
+                    retry_rate_pct = (bucket["retry_packets"] * 100.0) / transmissions
+                    first_attempt_success_rate_pct = (
+                        bucket["first_attempt_success"] * 100.0
+                    ) / transmissions
+                    avg_attempts = total_attempts / transmissions
+                    attempts_3_plus_pct = (attempts_3_plus * 100.0) / transmissions
+                    attempts_4_plus_pct = (bucket["attempts_4_plus"] * 100.0) / transmissions
+                    severe_contention_pct = (
+                        bucket["severe_contention_count"] * 100.0
+                    ) / transmissions
+
+                buckets.append(
+                    {
+                        "timestamp": bucket_ts,
+                        "transmissions": transmissions,
+                        "total_attempts": total_attempts,
+                        "first_attempt_success": int(bucket["first_attempt_success"]),
+                        "retry_packets": int(bucket["retry_packets"]),
+                        "retry_rate_pct": retry_rate_pct,
+                        "first_attempt_success_rate_pct": first_attempt_success_rate_pct,
+                        "avg_attempts": avg_attempts,
+                        "median_attempts": median_attempts,
+                        "p95_attempts": p95_attempts,
+                        "max_attempts": int(bucket["max_attempts"]),
+                        "attempts_1": int(bucket["attempts_1"]),
+                        "attempts_2": int(bucket["attempts_2"]),
+                        "attempts_3": int(bucket["attempts_3"]),
+                        "attempts_4_plus": int(bucket["attempts_4_plus"]),
+                        "attempts_3_plus": int(attempts_3_plus),
+                        "attempts_3_plus_pct": attempts_3_plus_pct,
+                        "attempts_4_plus_pct": attempts_4_plus_pct,
+                        "failed_transmissions": int(bucket["failed_transmissions"]),
+                        "busy_channel_events": int(bucket["busy_channel_events"]),
+                        "severe_contention_count": int(bucket["severe_contention_count"]),
+                        "severe_contention_pct": severe_contention_pct,
+                    }
+                )
+
+            total_transmissions = int(sum(b["transmissions"] for b in buckets))
+            total_attempts = int(sum(b["total_attempts"] for b in buckets))
+            first_attempt_success = int(sum(b["first_attempt_success"] for b in buckets))
+            retry_packets = int(sum(b["retry_packets"] for b in buckets))
+            attempts_1 = int(sum(b["attempts_1"] for b in buckets))
+            attempts_2 = int(sum(b["attempts_2"] for b in buckets))
+            attempts_3 = int(sum(b["attempts_3"] for b in buckets))
+            attempts_4_plus = int(sum(b["attempts_4_plus"] for b in buckets))
+            attempts_3_plus = int(attempts_3 + attempts_4_plus)
+            failed_transmissions = int(sum(b["failed_transmissions"] for b in buckets))
+            busy_channel_events = int(sum(b["busy_channel_events"] for b in buckets))
+            severe_contention_count = int(sum(b["severe_contention_count"] for b in buckets))
+            max_attempts = int(max([b["max_attempts"] for b in buckets], default=0))
+
+            retry_rate_pct = None
+            first_attempt_success_rate_pct = None
+            avg_attempts = None
+            attempts_3_plus_pct = None
+            attempts_4_plus_pct = None
+            severe_contention_pct = None
+
+            if total_transmissions > 0:
+                retry_rate_pct = (retry_packets * 100.0) / total_transmissions
+                first_attempt_success_rate_pct = (
+                    first_attempt_success * 100.0
+                ) / total_transmissions
+                avg_attempts = total_attempts / total_transmissions
+                attempts_3_plus_pct = (attempts_3_plus * 100.0) / total_transmissions
+                attempts_4_plus_pct = (attempts_4_plus * 100.0) / total_transmissions
+                severe_contention_pct = (severe_contention_count * 100.0) / total_transmissions
+
+            worst_bucket = None
+            scored_buckets = [
+                b
+                for b in buckets
+                if int(b.get("transmissions", 0)) > 0 and b.get("retry_rate_pct") is not None
+            ]
+            if scored_buckets:
+                worst = max(
+                    scored_buckets, key=lambda item: float(item.get("retry_rate_pct") or 0.0)
+                )
+                worst_bucket = {
+                    "timestamp": int(worst["timestamp"]),
+                    "retry_rate_pct": float(worst.get("retry_rate_pct") or 0.0),
+                    "attempts_3_plus_pct": float(worst.get("attempts_3_plus_pct") or 0.0),
+                    "max_attempts": int(worst.get("max_attempts") or 0),
+                    "transmissions": int(worst.get("transmissions") or 0),
+                }
+
+            summary = {
+                "total_transmissions": total_transmissions,
+                "total_attempts": total_attempts,
+                "first_attempt_success": first_attempt_success,
+                "retry_packets": retry_packets,
+                "retry_rate_pct": retry_rate_pct,
+                "first_attempt_success_rate_pct": first_attempt_success_rate_pct,
+                "avg_attempts": avg_attempts,
+                "median_attempts": _weighted_percentile(overall_dist, 0.5),
+                "p95_attempts": _weighted_percentile(overall_dist, 0.95),
+                "max_attempts": max_attempts,
+                "attempts_1": attempts_1,
+                "attempts_2": attempts_2,
+                "attempts_3": attempts_3,
+                "attempts_4_plus": attempts_4_plus,
+                "attempts_3_plus": attempts_3_plus,
+                "attempts_3_plus_pct": attempts_3_plus_pct,
+                "attempts_4_plus_pct": attempts_4_plus_pct,
+                "failed_transmissions": failed_transmissions,
+                "busy_channel_events": busy_channel_events,
+                "severe_contention_count": severe_contention_count,
+                "severe_contention_pct": severe_contention_pct,
+                "severe_attempt_threshold": severe_attempt_threshold,
+                "has_lbt_data": total_transmissions > 0,
+                "worst_bucket": worst_bucket,
+            }
+
+            packet_type_totals: dict = {}
+            packet_type_buckets = []
+            for row in type_rows:
+                bucket_ts = int(row["bucket_ts"])
+                packet_type = int(row["packet_type"] if row["packet_type"] is not None else -1)
+                transmissions = int(row["transmissions"] or 0)
+                total_attempts_for_type = int(row["total_attempts"] or 0)
+                attempts_3_plus = int((row["attempts_3"] or 0) + (row["attempts_4_plus"] or 0))
+
+                retry_rate_pct_for_type = None
+                first_attempt_success_rate_pct_for_type = None
+                avg_attempts_for_type = None
+                attempts_3_plus_pct_for_type = None
+                if transmissions > 0:
+                    retry_rate_pct_for_type = (
+                        int(row["retry_packets"] or 0) * 100.0
+                    ) / transmissions
+                    first_attempt_success_rate_pct_for_type = (
+                        int(row["first_attempt_success"] or 0) * 100.0
+                    ) / transmissions
+                    avg_attempts_for_type = total_attempts_for_type / transmissions
+                    attempts_3_plus_pct_for_type = (attempts_3_plus * 100.0) / transmissions
+
+                packet_type_buckets.append(
+                    {
+                        "timestamp": bucket_ts,
+                        "packet_type": packet_type,
+                        "packet_type_label": _packet_type_name(packet_type),
+                        "transmissions": transmissions,
+                        "total_attempts": total_attempts_for_type,
+                        "first_attempt_success": int(row["first_attempt_success"] or 0),
+                        "retry_packets": int(row["retry_packets"] or 0),
+                        "retry_rate_pct": retry_rate_pct_for_type,
+                        "first_attempt_success_rate_pct": first_attempt_success_rate_pct_for_type,
+                        "avg_attempts": avg_attempts_for_type,
+                        "attempts_1": int(row["attempts_1"] or 0),
+                        "attempts_2": int(row["attempts_2"] or 0),
+                        "attempts_3": int(row["attempts_3"] or 0),
+                        "attempts_4_plus": int(row["attempts_4_plus"] or 0),
+                        "attempts_3_plus": attempts_3_plus,
+                        "attempts_3_plus_pct": attempts_3_plus_pct_for_type,
+                        "max_attempts": int(row["max_attempts"] or 0),
+                        "failed_transmissions": int(row["failed_transmissions"] or 0),
+                        "severe_contention_count": int(row["severe_contention_count"] or 0),
+                    }
+                )
+
+                total_entry = packet_type_totals.setdefault(
+                    packet_type,
+                    {
+                        "packet_type": packet_type,
+                        "packet_type_label": _packet_type_name(packet_type),
+                        "transmissions": 0,
+                        "retry_packets": 0,
+                    },
+                )
+                total_entry["transmissions"] += transmissions
+                total_entry["retry_packets"] += int(row["retry_packets"] or 0)
+
+            packet_types = []
+            for pkt_type in sorted(
+                packet_type_totals.keys(),
+                key=lambda key: packet_type_totals[key]["transmissions"],
+                reverse=True,
+            ):
+                entry = packet_type_totals[pkt_type]
+                transmissions = int(entry["transmissions"])
+                retry_rate_pct_for_type = None
+                if transmissions > 0:
+                    retry_rate_pct_for_type = (int(entry["retry_packets"]) * 100.0) / transmissions
+                packet_types.append(
+                    {
+                        "packet_type": int(entry["packet_type"]),
+                        "packet_type_label": str(entry["packet_type_label"]),
+                        "transmissions": transmissions,
+                        "retry_packets": int(entry["retry_packets"]),
+                        "retry_rate_pct": retry_rate_pct_for_type,
+                    }
+                )
+
+            return {
+                "start_time": int(start_timestamp),
+                "end_time": int(end_timestamp),
+                "bucket_seconds": bucket_seconds,
+                "summary": summary,
+                "buckets": buckets,
+                "packet_types": packet_types,
+                "packet_type_buckets": packet_type_buckets,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get LBT diagnostics: {e}")
+            return {
+                "start_time": int(start_timestamp),
+                "end_time": int(end_timestamp),
+                "bucket_seconds": max(60, min(int(bucket_seconds), 3600)),
+                "summary": {
+                    "total_transmissions": 0,
+                    "total_attempts": 0,
+                    "first_attempt_success": 0,
+                    "retry_packets": 0,
+                    "retry_rate_pct": None,
+                    "first_attempt_success_rate_pct": None,
+                    "avg_attempts": None,
+                    "median_attempts": None,
+                    "p95_attempts": None,
+                    "max_attempts": 0,
+                    "attempts_1": 0,
+                    "attempts_2": 0,
+                    "attempts_3": 0,
+                    "attempts_4_plus": 0,
+                    "attempts_3_plus": 0,
+                    "attempts_3_plus_pct": None,
+                    "attempts_4_plus_pct": None,
+                    "failed_transmissions": 0,
+                    "busy_channel_events": 0,
+                    "severe_contention_count": 0,
+                    "severe_contention_pct": None,
+                    "severe_attempt_threshold": max(2, int(severe_attempt_threshold)),
+                    "has_lbt_data": False,
+                    "worst_bucket": None,
+                },
+                "buckets": [],
+                "packet_types": [],
+                "packet_type_buckets": [],
+            }
 
     def get_packet_stats(self, hours: int = 24) -> dict:
         try:
