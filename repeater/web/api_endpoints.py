@@ -3568,6 +3568,14 @@ class APIEndpoints:
             data = cherrypy.request.json or {}
             samples = data.get("samples", 8)
             delay = data.get("delay", 100)
+            known_signal_present = data.get("known_signal_present", False)
+            cad_symbol_num = data.get("cad_symbol_num", 2)
+            cad_timeout_ms = data.get("cad_timeout_ms", 500)
+            self.cad_calibration.session_config = {
+                "known_signal_present": known_signal_present,
+                "cad_symbol_num": cad_symbol_num,
+                "cad_timeout_ms": cad_timeout_ms,
+            }
             if self.cad_calibration.start_calibration(samples, delay):
                 return self._success("Calibration started")
             else:
@@ -3592,6 +3600,124 @@ class APIEndpoints:
             raise
         except Exception as e:
             logger.error(f"Error stopping CAD calibration: {e}")
+            return self._error(e)
+
+    @cherrypy.expose
+    @cherrypy.tools.json_out()
+    @cherrypy.tools.json_in()
+    def cad_manual_check(self):
+
+        try:
+            import asyncio
+
+            self._require_post()
+            data = cherrypy.request.json or {}
+
+            radio = getattr(self.daemon_instance, "radio", None) if self.daemon_instance else None
+            if not radio or not hasattr(radio, "perform_cad"):
+                return self._error("Radio CAD support is not available")
+            if self.event_loop is None:
+                return self._error("Event loop not available")
+
+            samples = self.cad_calibration._normalize_int(
+                data.get("samples", 1), default=1, minimum=1, maximum=32
+            )
+            det_peak = self.cad_calibration._normalize_int(
+                data.get("det_peak", getattr(radio, "_custom_cad_peak", 22) or 22),
+                default=22,
+                minimum=0,
+                maximum=255,
+            )
+            det_min = self.cad_calibration._normalize_int(
+                data.get("det_min", getattr(radio, "_custom_cad_min", 10) or 10),
+                default=10,
+                minimum=0,
+                maximum=255,
+            )
+            cad_symbol_num = self.cad_calibration._normalize_int(
+                data.get("cad_symbol_num", 2), default=2, minimum=1, maximum=16
+            )
+            if cad_symbol_num not in {1, 2, 4, 8, 16}:
+                cad_symbol_num = 2
+            cad_timeout_ms = self.cad_calibration._normalize_int(
+                data.get("cad_timeout_ms", 500), default=500, minimum=50, maximum=5000
+            )
+            cad_timeout_seconds = cad_timeout_ms / 1000.0
+            apply_live = self.cad_calibration._normalize_bool(
+                data.get("apply_live", False), default=False
+            )
+
+            if apply_live and hasattr(radio, "set_custom_cad_thresholds"):
+                try:
+                    radio.set_custom_cad_thresholds(peak=det_peak, min_val=det_min)
+                except Exception as exc:
+                    logger.warning("Failed to live-apply CAD thresholds: %s", exc)
+
+            async def run_manual_checks():
+                detections = 0
+                non_detections = 0
+                timeouts = 0
+                errors = 0
+                cad_done_count = 0
+
+                for _ in range(samples):
+                    try:
+                        result = await radio.perform_cad(
+                            det_peak=det_peak,
+                            det_min=det_min,
+                            timeout=cad_timeout_seconds,
+                            calibration=True,
+                            cad_symbol_num=cad_symbol_num,
+                        )
+                    except Exception as exc:
+                        logger.debug("Manual CAD check exception: %s", exc, exc_info=True)
+                        errors += 1
+                        continue
+
+                    if not isinstance(result, dict):
+                        result = {"detected": bool(result), "cad_done": True}
+
+                    if result.get("error"):
+                        errors += 1
+                    elif result.get("timeout"):
+                        timeouts += 1
+                    else:
+                        if bool(result.get("cad_done", False)):
+                            cad_done_count += 1
+                        if bool(result.get("detected", False)):
+                            detections += 1
+                        else:
+                            non_detections += 1
+
+                attempts = detections + non_detections + timeouts + errors
+                return {
+                    "det_peak": det_peak,
+                    "det_min": det_min,
+                    "cad_symbol_num": cad_symbol_num,
+                    "cad_timeout_ms": cad_timeout_ms,
+                    "apply_live": apply_live,
+                    "samples": samples,
+                    "attempts": attempts,
+                    "detections": detections,
+                    "non_detections": non_detections,
+                    "timeouts": timeouts,
+                    "errors": errors,
+                    "cad_done_count": cad_done_count,
+                    "detection_rate": (detections / attempts) * 100 if attempts > 0 else 0.0,
+                    "detected": detections > 0,
+                }
+
+            future = asyncio.run_coroutine_threadsafe(run_manual_checks(), self.event_loop)
+            timeout_seconds = max(2.0, (cad_timeout_seconds * samples) + 2.0)
+            payload = future.result(timeout=timeout_seconds)
+            return self._success(payload)
+        except FutureTimeoutError:
+            logger.error("Manual CAD check timed out")
+            return self._error("Manual CAD check timed out")
+        except cherrypy.HTTPError:
+            raise
+        except Exception as e:
+            logger.error(f"Error running manual CAD check: {e}", exc_info=True)
             return self._error(e)
 
     @cherrypy.expose
@@ -3985,12 +4111,26 @@ class APIEndpoints:
                 yield f"data: {json.dumps({'type': 'connected', 'message': 'Connected to CAD calibration stream'})}\n\n"
 
                 if self.cad_calibration.running:
-                    config = getattr(self.cad_calibration.daemon_instance, "config", {})
-                    radio_config = config.get("radio", {})
-                    sf = radio_config.get("spreading_factor", 8)
-
-                    peak_range, min_range = self.cad_calibration.get_test_ranges(sf)
+                    radio = getattr(self.cad_calibration.daemon_instance, "radio", None)
+                    if radio:
+                        runtime = self.cad_calibration._get_radio_runtime_config(radio)
+                        sf = runtime.get("spreading_factor", 8)
+                        peak_range, min_range = self.cad_calibration.get_test_ranges(
+                            sf,
+                            runtime.get("current_cad_peak"),
+                            runtime.get("current_cad_min"),
+                        )
+                    else:
+                        sf = 8
+                        runtime = {
+                            "bandwidth": None,
+                            "frequency": None,
+                            "current_cad_peak": None,
+                            "current_cad_min": None,
+                        }
+                        peak_range, min_range = self.cad_calibration.get_test_ranges(sf, 22, 10)
                     total_tests = len(peak_range) * len(min_range)
+                    session_cfg = getattr(self.cad_calibration, "session_config", {}) or {}
 
                     status_message = {
                         "type": "status",
@@ -4001,6 +4141,14 @@ class APIEndpoints:
                             "min_min": min(min_range),
                             "min_max": max(min_range),
                             "spreading_factor": sf,
+                            "bandwidth": runtime.get("bandwidth"),
+                            "frequency": runtime.get("frequency"),
+                            "current_peak": runtime.get("current_cad_peak"),
+                            "current_min": runtime.get("current_cad_min"),
+                            "cad_symbol_num": session_cfg.get("cad_symbol_num", 2),
+                            "known_signal_present": bool(
+                                session_cfg.get("known_signal_present", False)
+                            ),
                             "total_tests": total_tests,
                         },
                     }

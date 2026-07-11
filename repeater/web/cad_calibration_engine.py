@@ -1,9 +1,8 @@
 import asyncio
 import logging
-import random
 import threading
 import time
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger("HTTPServer")
 
@@ -18,92 +17,271 @@ class CADCalibrationEngine:
         self.progress = {"current": 0, "total": 0}
         self.clients = set()  # SSE clients
         self.calibration_thread = None
+        self.session_config: dict[str, Any] = {}
 
-    def get_test_ranges(self, spreading_factor: int):
-        """Get CAD test ranges"""
-        # Semtech CAD guidance region (BW125/CR4/5 reference):
-        # SF7/8~(peak=22,min=10), SF9~(23,10), SF10~(24,10), SF11~(25,10), SF12~(28,10)
-        # Semtech AN1200.48 evaluates higher detPeak values (up to the 30s at SF12).
-        # Keep cadDetMin centered around 10, but allow broader/higher detPeak exploration.
-        sf_ranges = {
-            7: (range(19, 30, 1), range(8, 14, 1)),
-            8: (range(19, 30, 1), range(8, 14, 1)),
-            9: (range(20, 32, 1), range(8, 14, 1)),
-            10: (range(21, 34, 1), range(8, 14, 1)),
-            11: (range(22, 36, 1), range(8, 14, 1)),
-            12: (range(24, 39, 1), range(8, 14, 1)),
+    @staticmethod
+    def _default_thresholds_for_sf(spreading_factor: int) -> tuple[int, int]:
+        defaults = {
+            7: (22, 10),
+            8: (22, 10),
+            9: (24, 10),
+            10: (25, 10),
+            11: (26, 10),
+            12: (30, 10),
         }
-        return sf_ranges.get(spreading_factor, sf_ranges[8])
+        return defaults.get(spreading_factor, defaults[8])
+
+    @staticmethod
+    def _normalize_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            parsed = default
+        return max(minimum, min(maximum, parsed))
+
+    @staticmethod
+    def _normalize_bool(value: Any, default: bool = False) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"1", "true", "yes", "y", "on"}:
+                return True
+            if lowered in {"0", "false", "no", "n", "off"}:
+                return False
+        return default
+
+    def _get_radio_runtime_config(self, radio) -> dict[str, Any]:
+        config = getattr(self.daemon_instance, "config", {}) if self.daemon_instance else {}
+        radio_cfg = config.get("radio", {})
+
+        frequency = getattr(radio, "frequency", radio_cfg.get("frequency"))
+        spreading_factor = getattr(radio, "spreading_factor", radio_cfg.get("spreading_factor", 8))
+        bandwidth = getattr(radio, "bandwidth", radio_cfg.get("bandwidth", 125000))
+        coding_rate = getattr(radio, "coding_rate", radio_cfg.get("coding_rate", 5))
+
+        try:
+            spreading_factor = int(spreading_factor)
+        except (TypeError, ValueError):
+            spreading_factor = 8
+        try:
+            bandwidth = int(bandwidth)
+        except (TypeError, ValueError):
+            bandwidth = 125000
+        try:
+            coding_rate = int(coding_rate)
+        except (TypeError, ValueError):
+            coding_rate = 5
+
+        det_peak, det_min = self._default_thresholds_for_sf(spreading_factor)
+        if hasattr(radio, "_get_thresholds_for_current_settings"):
+            try:
+                det_peak, det_min = radio._get_thresholds_for_current_settings()
+            except Exception:
+                logger.debug("Failed to read runtime CAD thresholds from radio", exc_info=True)
+
+        return {
+            "frequency": frequency,
+            "spreading_factor": spreading_factor,
+            "bandwidth": bandwidth,
+            "coding_rate": coding_rate,
+            "current_cad_peak": int(det_peak),
+            "current_cad_min": int(det_min),
+        }
+
+    def get_test_ranges(self, spreading_factor: int, base_peak: int, base_min: int):
+        """Get a small practical CAD test range around current/default values."""
+        semtech_peak, semtech_min = self._default_thresholds_for_sf(spreading_factor)
+        center_peak = int(base_peak if base_peak is not None else semtech_peak)
+        center_min = int(base_min if base_min is not None else semtech_min)
+
+        peak_candidates = {
+            center_peak - 2,
+            center_peak - 1,
+            center_peak,
+            center_peak + 1,
+            center_peak + 2,
+            semtech_peak,
+        }
+        min_candidates = {center_min - 1, center_min, center_min + 1, semtech_min}
+
+        peak_values = sorted(v for v in peak_candidates if 1 <= v <= 255)
+        min_values = sorted(v for v in min_candidates if 1 <= v <= 255)
+        return peak_values, min_values
+
+    @staticmethod
+    def _build_stepped_range(
+        lower: int, upper: int, step: int, anchor: Optional[int] = None
+    ) -> list[int]:
+        values = list(range(lower, upper + 1, max(1, step)))
+        values.extend([lower, upper])
+        if anchor is not None:
+            values.append(anchor)
+        return sorted({v for v in values if lower <= v <= upper})
+
+    def _rank_results_for_search(
+        self, results: list[dict], known_signal_present: bool, sf: int
+    ) -> list[dict]:
+        semtech_peak, semtech_min = self._default_thresholds_for_sf(sf)
+        if known_signal_present:
+            return sorted(
+                results,
+                key=lambda r: (
+                    r.get("detection_rate", 0.0),
+                    -(r.get("timeouts", 0) + r.get("errors", 0)),
+                    r.get("detections", 0),
+                    -abs(r.get("det_peak", semtech_peak) - semtech_peak),
+                    -abs(r.get("det_min", semtech_min) - semtech_min),
+                ),
+                reverse=True,
+            )
+
+        return sorted(
+            results,
+            key=lambda r: (
+                r.get("timeouts", 0) + r.get("errors", 0),
+                abs(r.get("detection_rate", 0.0)),
+                abs(r.get("det_peak", semtech_peak) - semtech_peak),
+                abs(r.get("det_min", semtech_min) - semtech_min),
+            ),
+        )
+
+    @staticmethod
+    def _search_objective_value(result: dict, known_signal_present: bool) -> float:
+        if known_signal_present:
+            return float(result.get("detection_rate", 0.0)) - (
+                float(result.get("timeouts", 0) + result.get("errors", 0)) * 5.0
+            )
+        return -(
+            float(result.get("timeouts", 0) + result.get("errors", 0)) * 100.0
+            + abs(float(result.get("detection_rate", 0.0)))
+        )
+
+    def _build_zoom_candidates(
+        self,
+        centers: list[dict],
+        peak_radius: int,
+        min_radius: int,
+        *,
+        peak_limit: tuple[int, int] = (1, 255),
+        min_limit: tuple[int, int] = (1, 255),
+    ) -> list[tuple[int, int]]:
+        candidates: set[tuple[int, int]] = set()
+        for center in centers:
+            cp = int(center.get("det_peak", 22))
+            cm = int(center.get("det_min", 10))
+            peak_lower = max(peak_limit[0], cp - peak_radius)
+            peak_upper = min(peak_limit[1], cp + peak_radius)
+            min_lower = max(min_limit[0], cm - min_radius)
+            min_upper = min(min_limit[1], cm + min_radius)
+            for peak in range(peak_lower, peak_upper + 1):
+                for min_val in range(min_lower, min_upper + 1):
+                    candidates.add((peak, min_val))
+        return sorted(candidates)
 
     async def test_cad_config(
-        self, radio, det_peak: int, det_min: int, samples: int = 20
+        self,
+        radio,
+        det_peak: int,
+        det_min: int,
+        samples: int = 20,
+        cad_symbol_num: int = 2,
+        cad_timeout_seconds: float = 0.5,
     ) -> Dict[str, Any]:
 
         detections = 0
-        baseline_detections = 0
+        non_detections = 0
+        timeouts = 0
+        errors = 0
+        cad_done_count = 0
+        attempts = 0
 
-        # First, get baseline with very insensitive settings (should detect nothing)
-        baseline_samples = 5
-        for _ in range(baseline_samples):
+        for _ in range(samples):
+            attempts += 1
             try:
-                # Use very high thresholds that should detect nothing
-                baseline_result = await radio.perform_cad(det_peak=35, det_min=25, timeout=0.3)
-                if baseline_result:
-                    baseline_detections += 1
+                result = await radio.perform_cad(
+                    det_peak=det_peak,
+                    det_min=det_min,
+                    timeout=cad_timeout_seconds,
+                    calibration=True,
+                    cad_symbol_num=cad_symbol_num,
+                )
             except Exception as exc:
-                logger.debug(f"CAD baseline sample failed: {exc}")
-            await asyncio.sleep(0.1)  # 100ms between baseline samples
+                logger.debug("CAD sample exception for peak=%s min=%s: %s", det_peak, det_min, exc)
+                errors += 1
+                await asyncio.sleep(0.02)
+                continue
 
-        # Wait before actual test
-        await asyncio.sleep(0.5)
+            if not isinstance(result, dict):
+                result = {"detected": bool(result), "cad_done": True}
 
-        # Now test the actual configuration
-        for i in range(samples):
-            try:
-                result = await radio.perform_cad(det_peak=det_peak, det_min=det_min, timeout=0.3)
-                if result:
+            if result.get("error"):
+                errors += 1
+            elif result.get("timeout"):
+                timeouts += 1
+            else:
+                if bool(result.get("cad_done", False)):
+                    cad_done_count += 1
+                if bool(result.get("detected", False)):
                     detections += 1
-            except Exception as exc:
-                logger.debug(f"CAD sample failed for det_peak={det_peak} det_min={det_min}: {exc}")
+                else:
+                    non_detections += 1
 
-            # Variable delay to avoid sampling artifacts
-            delay = 0.05 + (i % 3) * 0.05  # 50ms, 100ms, 150ms rotation
-            await asyncio.sleep(delay)
+            await asyncio.sleep(0.02)
 
-        # Calculate adjusted detection rate
-        baseline_rate = (baseline_detections / baseline_samples) * 100
-        detection_rate = (detections / samples) * 100
-
-        # Subtract baseline noise
-        adjusted_rate = max(0, detection_rate - baseline_rate)
+        detection_rate = (detections / attempts) * 100 if attempts > 0 else 0.0
 
         return {
             "det_peak": det_peak,
             "det_min": det_min,
-            "samples": samples,
+            "samples": attempts,
+            "attempts": attempts,
             "detections": detections,
+            "non_detections": non_detections,
+            "timeouts": timeouts,
+            "errors": errors,
+            "cad_done_count": cad_done_count,
+            "cad_symbol_num": cad_symbol_num,
             "detection_rate": detection_rate,
-            "baseline_rate": baseline_rate,
-            "adjusted_rate": adjusted_rate,  # This is the useful metric
-            "sensitivity_score": self._calculate_sensitivity_score(
-                det_peak, det_min, adjusted_rate
-            ),
         }
 
-    def _calculate_sensitivity_score(
-        self, det_peak: int, det_min: int, adjusted_rate: float
-    ) -> float:
+    def _select_recommended_result(
+        self, results: list[dict], known_signal_present: bool, sf: int
+    ) -> Tuple[Optional[dict], str]:
+        if not results:
+            return None, "No calibration results collected."
 
-        # Ideal detection rate is around 10-30% for good sensitivity without false positives
-        ideal_rate = 20.0
-        rate_penalty = abs(adjusted_rate - ideal_rate) / ideal_rate
+        semtech_peak, semtech_min = self._default_thresholds_for_sf(sf)
 
-        # Prefer values near Semtech-centered practical defaults
-        sensitivity_penalty = (abs(det_peak - 25) + abs(det_min - 10)) / 24.0
+        if known_signal_present:
+            ranked = sorted(
+                results,
+                key=lambda r: (
+                    r.get("detection_rate", 0.0),
+                    -(r.get("timeouts", 0) + r.get("errors", 0)),
+                    -abs(r.get("det_peak", semtech_peak) - semtech_peak),
+                    -abs(r.get("det_min", semtech_min) - semtech_min),
+                ),
+                reverse=True,
+            )
+            return (
+                ranked[0],
+                "Recommended using known-signal measurements (maximize CAD_DETECTED while minimizing timeouts/errors).",
+            )
 
-        # Lower penalty = higher score
-        score = max(0, 100 - (rate_penalty * 50) - (sensitivity_penalty * 20))
-        return score
+        ranked = sorted(
+            results,
+            key=lambda r: (
+                r.get("timeouts", 0) + r.get("errors", 0),
+                abs(r.get("detection_rate", 0.0)),
+                abs(r.get("det_peak", semtech_peak) - semtech_peak),
+                abs(r.get("det_min", semtech_min) - semtech_min),
+            ),
+        )
+        return (
+            ranked[0],
+            "Recommended from no-known-signal run (minimize false CAD_DETECTED and instability). Validation with a known compatible LoRa transmission is still required.",
+        )
 
     def broadcast_to_clients(self, data):
 
@@ -136,125 +314,230 @@ class CADCalibrationEngine:
                 )
                 return
 
-            # Get spreading factor from daemon instance
-            config = getattr(self.daemon_instance, "config", {})
-            radio_config = config.get("radio", {})
-            sf = radio_config.get("spreading_factor", 8)
+            runtime_cfg = self._get_radio_runtime_config(radio)
+            sf = runtime_cfg["spreading_factor"]
+            base_peak = runtime_cfg["current_cad_peak"]
+            base_min = runtime_cfg["current_cad_min"]
+            known_signal_present = bool(self.session_config.get("known_signal_present", False))
+            cad_symbol_num = int(self.session_config.get("cad_symbol_num", 2))
+            cad_timeout_seconds = float(self.session_config.get("cad_timeout_seconds", 0.5))
 
-            # Get test ranges
-            peak_range, min_range = self.get_test_ranges(sf)
-
-            total_tests = len(peak_range) * len(min_range)
-            self.progress = {"current": 0, "total": total_tests}
-
-            self.broadcast_to_clients(
-                {
-                    "type": "status",
-                    "message": f"Starting calibration: SF{sf}, {total_tests} tests",
-                    "test_ranges": {
-                        "peak_min": min(peak_range),
-                        "peak_max": max(peak_range),
-                        "min_min": min(min_range),
-                        "min_max": max(min_range),
-                        "spreading_factor": sf,
-                        "total_tests": total_tests,
-                    },
-                }
-            )
-
+            # Coarse-to-fine search settings (bounded budget, no broad exhaustive sweeps)
+            coarse_peak_lower = max(1, int(base_peak) - 12)
+            coarse_peak_upper = min(255, int(base_peak) + 12)
+            coarse_min_lower = max(1, int(base_min) - 5)
+            coarse_min_upper = min(255, int(base_min) + 5)
+            max_total_tests = 84
             current = 0
+            estimated_total = 0
+            self.progress = {"current": 0, "total": estimated_total}
 
-            peak_list = list(peak_range)
-            min_list = list(min_range)
-
-            # Create all test combinations
-            test_combinations = []
-            for det_peak in peak_list:
-                for det_min in min_list:
-                    test_combinations.append((det_peak, det_min))
-
-            # Sort by distance from center for center-out pattern
-            peak_center = (max(peak_list) + min(peak_list)) / 2
-            min_center = (max(min_list) + min(min_list)) / 2
-
-            def distance_from_center(combo):
-                peak, min_val = combo
-                return ((peak - peak_center) ** 2 + (min_val - min_center) ** 2) ** 0.5
-
-            # Sort by distance from center
-            test_combinations.sort(key=distance_from_center)
-
-            # Randomize within bands for better coverage
-            band_size = max(1, len(test_combinations) // 8)  # Create 8 bands
-            randomized_combinations = []
-
-            for i in range(0, len(test_combinations), band_size):
-                band = test_combinations[i : i + band_size]
-                random.shuffle(band)  # Randomize within each band
-                randomized_combinations.extend(band)
-
-            # Run calibration in event loop with center-out randomized pattern
+            # Run calibration in event loop with staged coarse-to-fine search
             if self.event_loop:
-                for det_peak, det_min in randomized_combinations:
-                    if not self.running:
+                stage_definitions: list[dict[str, Any]] = [
+                    {
+                        "stage_key": "coarse",
+                        "label": "coarse scan",
+                        "builder": lambda: [
+                            (peak, min_val)
+                            for peak in self._build_stepped_range(
+                                coarse_peak_lower, coarse_peak_upper, 4, anchor=int(base_peak)
+                            )
+                            for min_val in self._build_stepped_range(
+                                coarse_min_lower, coarse_min_upper, 2, anchor=int(base_min)
+                            )
+                        ],
+                    },
+                    {
+                        "stage_key": "zoom1",
+                        "label": "zoom refinement 1",
+                        "builder": lambda: self._build_zoom_candidates(
+                            self._rank_results_for_search(
+                                list(self.results.values()), known_signal_present, sf
+                            )[:3],
+                            peak_radius=4,
+                            min_radius=2,
+                        ),
+                    },
+                    {
+                        "stage_key": "zoom2",
+                        "label": "zoom refinement 2",
+                        "builder": lambda: self._build_zoom_candidates(
+                            self._rank_results_for_search(
+                                list(self.results.values()), known_signal_present, sf
+                            )[:2],
+                            peak_radius=2,
+                            min_radius=1,
+                        ),
+                    },
+                    {
+                        "stage_key": "fine",
+                        "label": "fine polish",
+                        "builder": lambda: self._build_zoom_candidates(
+                            self._rank_results_for_search(
+                                list(self.results.values()), known_signal_present, sf
+                            )[:1],
+                            peak_radius=1,
+                            min_radius=1,
+                        ),
+                    },
+                ]
+                best_score_before_stage: Optional[float] = None
+                for stage_index, stage in enumerate(stage_definitions, start=1):
+                    if not self.running or current >= max_total_tests:
                         break
 
-                    current += 1
-                    self.progress["current"] = current
+                    raw_candidates: list[tuple[int, int]] = stage["builder"]()
+                    candidates = [
+                        candidate
+                        for candidate in raw_candidates
+                        if f"{candidate[0]}-{candidate[1]}" not in self.results
+                    ]
+                    remaining_budget = max_total_tests - current
+                    candidates = candidates[:remaining_budget]
+                    if not candidates:
+                        continue
 
-                    # Update progress
+                    estimated_total = max(self.progress.get("total", 0), current + len(candidates))
+                    self.progress["total"] = estimated_total
+
+                    peak_values = [candidate[0] for candidate in candidates]
+                    min_values = [candidate[1] for candidate in candidates]
                     self.broadcast_to_clients(
                         {
-                            "type": "progress",
-                            "current": current,
-                            "total": total_tests,
-                            "peak": det_peak,
-                            "min": det_min,
+                            "type": "status",
+                            "message": (
+                                f"Calibration stage {stage_index}/{len(stage_definitions)} "
+                                f"({stage['label']}): testing {len(candidates)} combinations"
+                            ),
+                            "test_ranges": {
+                                "peak_min": min(peak_values),
+                                "peak_max": max(peak_values),
+                                "min_min": min(min_values),
+                                "min_max": max(min_values),
+                                "spreading_factor": sf,
+                                "bandwidth": runtime_cfg["bandwidth"],
+                                "frequency": runtime_cfg["frequency"],
+                                "current_peak": base_peak,
+                                "current_min": base_min,
+                                "cad_symbol_num": cad_symbol_num,
+                                "known_signal_present": known_signal_present,
+                                "total_tests": estimated_total,
+                                "pass_index": stage_index,
+                                "max_passes": len(stage_definitions),
+                                "stage": stage["stage_key"],
+                            },
                         }
                     )
 
-                    # Run the test
-                    future = asyncio.run_coroutine_threadsafe(
-                        self.test_cad_config(radio, det_peak, det_min, samples), self.event_loop
+                    for det_peak, det_min in candidates:
+                        if not self.running:
+                            break
+
+                        current += 1
+                        self.progress["current"] = current
+
+                        self.broadcast_to_clients(
+                            {
+                                "type": "progress",
+                                "current": current,
+                                "total": estimated_total,
+                                "det_peak": det_peak,
+                                "det_min": det_min,
+                                "known_signal_present": known_signal_present,
+                                "pass_index": stage_index,
+                                "max_passes": len(stage_definitions),
+                                "stage": stage["stage_key"],
+                            }
+                        )
+
+                        future = asyncio.run_coroutine_threadsafe(
+                            self.test_cad_config(
+                                radio,
+                                det_peak,
+                                det_min,
+                                samples=samples,
+                                cad_symbol_num=cad_symbol_num,
+                                cad_timeout_seconds=cad_timeout_seconds,
+                            ),
+                            self.event_loop,
+                        )
+
+                        try:
+                            result = future.result(timeout=30)
+                            self.results[f"{det_peak}-{det_min}"] = result
+                            self.broadcast_to_clients(
+                                {
+                                    "type": "result",
+                                    "pass_index": stage_index,
+                                    "stage": stage["stage_key"],
+                                    **result,
+                                }
+                            )
+                        except Exception as e:
+                            logger.error(f"CAD test failed for peak={det_peak}, min={det_min}: {e}")
+
+                        if self.running and delay_ms > 0:
+                            time.sleep(delay_ms / 1000.0)
+
+                    if not self.running or not self.results:
+                        break
+
+                    ranked_results = self._rank_results_for_search(
+                        list(self.results.values()), known_signal_present, sf
                     )
-
-                    try:
-                        result = future.result(timeout=30)  # 30 second timeout per test
-
-                        # Store result
-                        key = f"{det_peak}-{det_min}"
-                        self.results[key] = result
-
-                        # Send result to clients
-                        self.broadcast_to_clients({"type": "result", **result})
-                    except Exception as e:
-                        logger.error(f"CAD test failed for peak={det_peak}, min={det_min}: {e}")
-
-                    # Delay between tests
-                    if self.running and delay_ms > 0:
-                        time.sleep(delay_ms / 1000.0)
+                    best_score_after_stage = self._search_objective_value(
+                        ranked_results[0], known_signal_present
+                    )
+                    min_improvement = 2.0 if known_signal_present else 1.0
+                    if (
+                        stage_index >= 2
+                        and best_score_before_stage is not None
+                        and (best_score_after_stage - best_score_before_stage) < min_improvement
+                    ):
+                        self.broadcast_to_clients(
+                            {
+                                "type": "status",
+                                "message": (
+                                    f"Calibration converged after {stage['label']} "
+                                    f"(improvement < 2%)."
+                                ),
+                            }
+                        )
+                        break
+                    best_score_before_stage = best_score_after_stage
 
             if self.running:
-                # Find best result based on sensitivity score (not just detection rate)
                 best_result = None
                 recommended_result = None
+                recommendation_reason = "No recommendation generated."
+                signal_activity_observed = False
+                known_signal_effective = known_signal_present
+                qualification = (
+                    "Known compatible LoRa signal present during calibration."
+                    if known_signal_present
+                    else "No known compatible LoRa signal confirmed during calibration."
+                )
                 if self.results:
-                    # Find result with highest sensitivity score (best balance)
-                    best_result = max(
-                        self.results.values(), key=lambda x: x.get("sensitivity_score", 0)
+                    all_results = list(self.results.values())
+                    best_result = max(all_results, key=lambda x: x.get("detection_rate", 0.0))
+                    recommended_result, recommendation_reason = self._select_recommended_result(
+                        all_results, known_signal_present=known_signal_present, sf=sf
                     )
+                    total_attempts = sum(int(r.get("attempts", 0) or 0) for r in all_results)
+                    total_detections = sum(int(r.get("detections", 0) or 0) for r in all_results)
+                    best_rate = float(best_result.get("detection_rate", 0.0) or 0.0)
+                    min_detection_floor = max(5, int(total_attempts * 0.03))
+                    signal_activity_observed = (
+                        total_detections >= min_detection_floor and best_rate >= 15.0
+                    )
+                    known_signal_effective = known_signal_present or signal_activity_observed
 
-                    # Also find result with ideal adjusted detection rate (10-30%)
-                    ideal_results = [
-                        r for r in self.results.values() if 10 <= r.get("adjusted_rate", 0) <= 30
-                    ]
-                    if ideal_results:
-                        # Among ideal results, pick the one with best sensitivity score
-                        recommended_result = max(
-                            ideal_results, key=lambda x: x.get("sensitivity_score", 0)
+                    if not known_signal_present and signal_activity_observed:
+                        qualification = (
+                            "Signal activity was observed during quiet-mode calibration, "
+                            "but known-signal mode was not explicitly enabled."
                         )
-                    else:
-                        recommended_result = best_result
 
                 self.broadcast_to_clients(
                     {
@@ -264,6 +547,11 @@ class CADCalibrationEngine:
                             {
                                 "best": best_result,
                                 "recommended": recommended_result,
+                                "recommendation_reason": recommendation_reason,
+                                "known_signal_present": known_signal_present,
+                                "signal_activity_observed": signal_activity_observed,
+                                "known_signal_effective": known_signal_effective,
+                                "qualification": qualification,
                                 "total_tests": len(self.results),
                             }
                             if best_result
@@ -284,6 +572,26 @@ class CADCalibrationEngine:
 
         if self.running:
             return False
+        samples = self._normalize_int(samples, default=8, minimum=1, maximum=64)
+        delay_ms = self._normalize_int(delay_ms, default=100, minimum=0, maximum=2000)
+        known_signal_present = self._normalize_bool(
+            self.session_config.get("known_signal_present", False), default=False
+        )
+        cad_symbol_num = self._normalize_int(
+            self.session_config.get("cad_symbol_num", 2), default=2, minimum=1, maximum=16
+        )
+        if cad_symbol_num not in {1, 2, 4, 8, 16}:
+            cad_symbol_num = 2
+        cad_timeout_ms = self._normalize_int(
+            self.session_config.get("cad_timeout_ms", 500), default=500, minimum=50, maximum=5000
+        )
+
+        self.session_config = {
+            "known_signal_present": known_signal_present,
+            "cad_symbol_num": cad_symbol_num,
+            "cad_timeout_ms": cad_timeout_ms,
+            "cad_timeout_seconds": cad_timeout_ms / 1000.0,
+        }
 
         self.running = True
         self.results.clear()

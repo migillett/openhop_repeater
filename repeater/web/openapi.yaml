@@ -1333,6 +1333,91 @@ paths:
               schema:
                 $ref: '#/components/schemas/SuccessResponse'
 
+  /cad_manual_check:
+    post:
+      tags: [CAD Calibration]
+      summary: Run manual CAD check
+      description: Execute one or more immediate CAD checks and return aggregated detection metrics.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                samples:
+                  type: integer
+                  minimum: 1
+                  maximum: 32
+                  default: 1
+                  description: Number of CAD checks to perform.
+                det_peak:
+                  type: integer
+                  minimum: 0
+                  maximum: 255
+                  description: Temporary CAD peak threshold.
+                det_min:
+                  type: integer
+                  minimum: 0
+                  maximum: 255
+                  description: Temporary CAD minimum threshold.
+                cad_symbol_num:
+                  type: integer
+                  enum: [1, 2, 4, 8, 16]
+                  default: 2
+                  description: CAD symbol count used by the radio.
+                cad_timeout_ms:
+                  type: integer
+                  minimum: 50
+                  maximum: 5000
+                  default: 500
+                  description: Timeout per CAD check in milliseconds.
+                apply_live:
+                  type: boolean
+                  default: false
+                  description: Apply det_peak and det_min to live radio thresholds before checks.
+      responses:
+        '200':
+          description: Manual CAD check result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      det_peak:
+                        type: integer
+                      det_min:
+                        type: integer
+                      cad_symbol_num:
+                        type: integer
+                      cad_timeout_ms:
+                        type: integer
+                      apply_live:
+                        type: boolean
+                      samples:
+                        type: integer
+                      attempts:
+                        type: integer
+                      detections:
+                        type: integer
+                      non_detections:
+                        type: integer
+                      timeouts:
+                        type: integer
+                      errors:
+                        type: integer
+                      cad_done_count:
+                        type: integer
+                      detection_rate:
+                        type: number
+                      detected:
+                        type: boolean
+
   /save_cad_settings:
     post:
       tags: [CAD Calibration]
