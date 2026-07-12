@@ -1446,6 +1446,11 @@ paths:
                   maximum: 255
                   description: CAD minimum value
                   example: 64
+                cad_symbol_num:
+                  type: integer
+                  enum: [1, 2, 4, 8, 16]
+                  default: 2
+                  description: CAD symbol count to persist for runtime CAD detections.
       responses:
         '200':
           description: Settings saved

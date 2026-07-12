@@ -2181,15 +2181,35 @@ class APIEndpoints:
                 return self._error("No configuration updates provided")
 
             # Use ConfigManager to update and save configuration
-            # Web changes (CORS, web_path) don't require live update
+            # Persist web changes first, then apply to running HTTP server.
             result = self.config_manager.update_and_save(updates=updates, live_update=False)
 
             if result.get("success"):
+                live_applied = False
+                frontend_switched = False
+                app = (
+                    getattr(getattr(self.daemon_instance, "http_server", None), "app", None)
+                    if self.daemon_instance
+                    else None
+                )
+                if app and hasattr(app, "apply_web_config"):
+                    try:
+                        frontend_switched = bool(app.apply_web_config())
+                        live_applied = True
+                    except Exception as exc:
+                        logger.warning("Failed to apply web config live: %s", exc)
                 logger.info(f"Web configuration updated: {list(updates.keys())}")
                 return self._success(
                     {
                         "persisted": result.get("saved", False),
-                        "message": "Web configuration saved successfully. Restart required for changes to take effect.",
+                        "live_applied": live_applied,
+                        "frontend_switched": frontend_switched,
+                        "restart_required": not live_applied,
+                        "message": (
+                            "Web configuration applied immediately."
+                            if live_applied
+                            else "Web configuration saved. Restart required for changes to take effect."
+                        ),
                     }
                 )
             else:
@@ -3569,7 +3589,21 @@ class APIEndpoints:
             samples = data.get("samples", 8)
             delay = data.get("delay", 100)
             known_signal_present = data.get("known_signal_present", False)
-            cad_symbol_num = data.get("cad_symbol_num", 2)
+            radio = getattr(self.daemon_instance, "radio", None) if self.daemon_instance else None
+            default_cad_symbol_num = (
+                self.config.get("radio", {}).get("cad", {}).get("symbol_num", 2)
+            )
+            radio_symbol_num = getattr(radio, "_custom_cad_symbol_num", None) if radio else None
+            if radio_symbol_num in {1, 2, 4, 8, 16}:
+                default_cad_symbol_num = radio_symbol_num
+            try:
+                default_cad_symbol_num = int(default_cad_symbol_num)
+            except (TypeError, ValueError):
+                default_cad_symbol_num = 2
+            if default_cad_symbol_num not in {1, 2, 4, 8, 16}:
+                default_cad_symbol_num = 2
+
+            cad_symbol_num = data.get("cad_symbol_num", default_cad_symbol_num)
             cad_timeout_ms = data.get("cad_timeout_ms", 500)
             self.cad_calibration.session_config = {
                 "known_signal_present": known_signal_present,
@@ -3618,6 +3652,15 @@ class APIEndpoints:
                 return self._error("Radio CAD support is not available")
             if self.event_loop is None:
                 return self._error("Event loop not available")
+            default_cad_symbol_num = getattr(
+                radio, "_custom_cad_symbol_num", None
+            ) or self.config.get("radio", {}).get("cad", {}).get("symbol_num", 2)
+            try:
+                default_cad_symbol_num = int(default_cad_symbol_num)
+            except (TypeError, ValueError):
+                default_cad_symbol_num = 2
+            if default_cad_symbol_num not in {1, 2, 4, 8, 16}:
+                default_cad_symbol_num = 2
 
             samples = self.cad_calibration._normalize_int(
                 data.get("samples", 1), default=1, minimum=1, maximum=32
@@ -3635,10 +3678,13 @@ class APIEndpoints:
                 maximum=255,
             )
             cad_symbol_num = self.cad_calibration._normalize_int(
-                data.get("cad_symbol_num", 2), default=2, minimum=1, maximum=16
+                data.get("cad_symbol_num", default_cad_symbol_num),
+                default=default_cad_symbol_num,
+                minimum=1,
+                maximum=16,
             )
             if cad_symbol_num not in {1, 2, 4, 8, 16}:
-                cad_symbol_num = 2
+                cad_symbol_num = default_cad_symbol_num
             cad_timeout_ms = self.cad_calibration._normalize_int(
                 data.get("cad_timeout_ms", 500), default=500, minimum=50, maximum=5000
             )
@@ -3730,6 +3776,7 @@ class APIEndpoints:
             data = cherrypy.request.json or {}
             peak = data.get("peak")
             min_val = data.get("min_val")
+            cad_symbol_num = data.get("cad_symbol_num")
             detection_rate = data.get("detection_rate", 0)
 
             if peak is None or min_val is None:
@@ -3741,8 +3788,17 @@ class APIEndpoints:
             except (TypeError, ValueError):
                 return self._error("peak and min_val must be integers")
 
+            if cad_symbol_num is None:
+                cad_symbol_num = self.config.get("radio", {}).get("cad", {}).get("symbol_num", 2)
+            try:
+                cad_symbol_num = int(cad_symbol_num)
+            except (TypeError, ValueError):
+                return self._error("cad_symbol_num must be an integer")
+
             if not (0 <= peak <= 255) or not (0 <= min_val <= 255):
                 return self._error("CAD thresholds must be between 0 and 255")
+            if cad_symbol_num not in {1, 2, 4, 8, 16}:
+                return self._error("cad_symbol_num must be one of: 1, 2, 4, 8, 16")
 
             if (
                 self.daemon_instance
@@ -3751,7 +3807,14 @@ class APIEndpoints:
             ):
                 if hasattr(self.daemon_instance.radio, "set_custom_cad_thresholds"):
                     self.daemon_instance.radio.set_custom_cad_thresholds(peak=peak, min_val=min_val)
-                    logger.info(f"Applied CAD settings to radio: peak={peak}, min={min_val}")
+                if hasattr(self.daemon_instance.radio, "set_custom_cad_symbol_num"):
+                    self.daemon_instance.radio.set_custom_cad_symbol_num(cad_symbol_num)
+                logger.info(
+                    "Applied CAD settings to radio: peak=%s, min=%s, symbols=%s",
+                    peak,
+                    min_val,
+                    cad_symbol_num,
+                )
 
             if "radio" not in self.config:
                 self.config["radio"] = {}
@@ -3760,18 +3823,30 @@ class APIEndpoints:
 
             self.config["radio"]["cad"]["peak_threshold"] = peak
             self.config["radio"]["cad"]["min_threshold"] = min_val
+            self.config["radio"]["cad"]["symbol_num"] = cad_symbol_num
 
             saved = self.config_manager.save_to_file()
             if not saved:
                 return self._error("Failed to save configuration to file")
 
             logger.info(
-                f"Saved CAD settings to config: peak={peak}, min={min_val}, rate={detection_rate:.1f}%"
+                "Saved CAD settings to config: peak=%s, min=%s, symbols=%s, rate=%.1f%%",
+                peak,
+                min_val,
+                cad_symbol_num,
+                detection_rate,
             )
             return {
                 "success": True,
-                "message": f"CAD settings saved: peak={peak}, min={min_val}",
-                "settings": {"peak": peak, "min_val": min_val, "detection_rate": detection_rate},
+                "message": (
+                    f"CAD settings saved: peak={peak}, min={min_val}, symbols={cad_symbol_num}"
+                ),
+                "settings": {
+                    "peak": peak,
+                    "min_val": min_val,
+                    "cad_symbol_num": cad_symbol_num,
+                    "detection_rate": detection_rate,
+                },
             }
         except cherrypy.HTTPError:
             # Re-raise HTTP errors (like 405 Method Not Allowed) without logging
