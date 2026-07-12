@@ -183,10 +183,26 @@ class RepeaterDaemon:
                     cad_config = self.config.get("radio", {}).get("cad", {})
                     peak_threshold = cad_config.get("peak_threshold", 23)
                     min_threshold = cad_config.get("min_threshold", 11)
+                    symbol_num = cad_config.get("symbol_num", 2)
+                    try:
+                        symbol_num = int(symbol_num)
+                    except (TypeError, ValueError):
+                        symbol_num = 2
+                    if symbol_num not in {1, 2, 4, 8, 16}:
+                        logger.warning(
+                            "Invalid CAD symbol_num in config (%s); defaulting to 2",
+                            symbol_num,
+                        )
+                        symbol_num = 2
 
                     self.radio.set_custom_cad_thresholds(peak=peak_threshold, min_val=min_threshold)
+                    if hasattr(self.radio, "set_custom_cad_symbol_num"):
+                        self.radio.set_custom_cad_symbol_num(symbol_num)
                     logger.info(
-                        f"CAD thresholds set from config: peak={peak_threshold}, min={min_threshold}"
+                        "CAD settings set from config: peak=%s, min=%s, symbols=%s",
+                        peak_threshold,
+                        min_threshold,
+                        symbol_num,
                     )
                 else:
                     logger.warning("Radio does not support CAD configuration")
